@@ -3,53 +3,68 @@ import { json } from '@sveltejs/kit';
 import type { RequestHandler } from './$types';
 import { OPENROUTER_API_KEY } from '$env/static/private';
 
-// List of jobs that don't require bachelor's degrees
-const NON_DEGREE_JOBS = [
-    'Customer Service Representative', 'Retail Sales Associate', 'Administrative Assistant',
-    'Food Service Worker', 'Security Guard', 'Delivery Driver', 'Warehouse Worker',
-    'Housekeeper', 'Cashier', 'Receptionist', 'Data Entry Clerk', 'Caregiver',
-    'Construction Worker', 'Electrician', 'Plumber', 'Automotive Technician',
-    'Hair Stylist', 'Beautician', 'Medical Assistant', 'Pharmacy Technician',
-    'Dental Assistant', 'HVAC Technician', 'Welder', 'Machinist', 'Carpenter',
-    'Painter', 'Landscaper', 'Janitor', 'Cook', 'Bartender', 'Barista',
-    'Bank Teller', 'Call Center Agent', 'Freelance Writer', 'Graphic Designer',
-    'Web Designer', 'Social Media Manager', 'Photographer', 'Fitness Trainer',
-    'Massage Therapist', 'Nanny', 'Personal Care Aide', 'Home Health Aide',
-    'Truck Driver', 'Forklift Operator', 'Shipping Clerk', 'Stock Clerk',
-    'Tailor', 'Jeweler', 'Baker', 'Butcher', 'Florist', 'Farm Worker',
-    'Fishery Worker', 'Tour Guide', 'Event Planner', 'Dog Trainer'
-];
+// Pre-compiled regex patterns for better performance
+const SALARY_PATTERNS = {
+    monthly: /(?:₱|php|pesos?)\s*([\d,]+)(?:\s*-\s*([\d,]+))?\s*(?:per\s*month|monthly)/i,
+    annual: /(?:₱|php|pesos?)\s*([\d,]+)(?:\s*-\s*([\d,]+))?\s*(?:per\s*year|annually)/i
+};
 
-// List of jobs that require at least a bachelor's degree
-const DEGREE_REQUIRED_JOBS = [
-    'Software Engineer', 'Data Scientist', 'Financial Analyst', 'Accountant',
-    'Registered Nurse', 'Teacher', 'Architect', 'Civil Engineer',
-    'Mechanical Engineer', 'Electrical Engineer', 'Marketing Manager',
-    'Human Resources Manager', 'Project Manager', 'Business Analyst',
-    'Pharmacist', 'Physician', 'Dentist', 'Psychologist', 'Lawyer',
-    'Professor', 'Research Scientist', 'IT Manager', 'Systems Analyst',
-    'Database Administrator', 'Network Engineer', 'Biomedical Engineer',
-    'Environmental Scientist', 'Urban Planner', 'Economist', 'Social Worker'
-];
-
-// List of jobs that typically require advanced degrees (Master's or Doctorate)
-const ADVANCED_DEGREE_JOBS = [
-    'Senior Software Engineer', 'Data Architect', 'Chief Financial Officer',
-    'Clinical Psychologist', 'Surgeon', 'University Professor', 'Research Director',
-    'Principal Engineer', 'Senior Research Scientist', 'Executive Director',
-    'Medical Director', 'Dean of Faculty', 'Policy Advisor', 'Senior Economist',
-    'Chief Technology Officer', 'Chief Medical Officer', 'Judge', 'Patent Attorney'
-];
+// Categorized job lists with pre-lowered strings for faster matching
+const JOB_CATEGORIES = {
+    nonDegree: [
+        'customer service representative', 'retail sales associate', 'administrative assistant',
+        'food service worker', 'security guard', 'delivery driver', 'warehouse worker',
+        'housekeeper', 'cashier', 'receptionist', 'data entry clerk', 'caregiver',
+        'construction worker', 'electrician', 'plumber', 'automotive technician',
+        'hair stylist', 'beautician', 'medical assistant', 'pharmacy technician',
+        'dental assistant', 'hvac technician', 'welder', 'machinist', 'carpenter',
+        'painter', 'landscaper', 'janitor', 'cook', 'bartender', 'barista',
+        'bank teller', 'call center agent', 'freelance writer', 'graphic designer',
+        'web designer', 'social media manager', 'photographer', 'fitness trainer',
+        'massage therapist', 'nanny', 'personal care aide', 'home health aide',
+        'truck driver', 'forklift operator', 'shipping clerk', 'stock clerk',
+        'tailor', 'jeweler', 'baker', 'butcher', 'florist', 'farm worker',
+        'fishery worker', 'tour guide', 'event planner', 'dog trainer'
+    ],
+    degreeRequired: [
+        'software engineer', 'data scientist', 'financial analyst', 'accountant',
+        'registered nurse', 'teacher', 'architect', 'civil engineer',
+        'mechanical engineer', 'electrical engineer', 'marketing manager',
+        'human resources manager', 'project manager', 'business analyst',
+        'pharmacist', 'physician', 'dentist', 'psychologist', 'lawyer',
+        'professor', 'research scientist', 'it manager', 'systems analyst',
+        'database administrator', 'network engineer', 'biomedical engineer',
+        'environmental scientist', 'urban planner', 'economist', 'social worker'
+    ],
+    advancedDegree: [
+        'senior software engineer', 'data architect', 'chief financial officer',
+        'clinical psychologist', 'surgeon', 'university professor', 'research director',
+        'principal engineer', 'senior research scientist', 'executive director',
+        'medical director', 'dean of faculty', 'policy advisor', 'senior economist',
+        'chief technology officer', 'chief medical officer', 'judge', 'patent attorney'
+    ]
+};
 
 // Salary validation constants
-const MIN_MONTHLY_SALARY_PHP = 10000; // Minimum wage in Philippines is ~₱12,000
-const MAX_MONTHLY_SALARY_PHP = 500000; // Realistic upper bound for executive positions
-const SALARY_RANGE_THRESHOLD = 0.5; // Max difference between min and max should be at least 50%
+const SALARY_CONSTANTS = {
+    minMonthly: 10000,
+    maxMonthly: 500000,
+    rangeThreshold: 0.5
+};
+
+// Education level categorization
+const EDUCATION_LEVELS = {
+    belowBachelors: new Set(['high school', 'vocational', 'associate', 'some college', 'secondary', 'other', 'highschool']),
+    bachelors: new Set(['bachelor']),
+    advanced: new Set(['master', 'doctorate'])
+};
+
+// Cache for job recommendations to avoid redundant API calls
+const recommendationCache = new Map();
 
 export const POST: RequestHandler = async ({ request }) => {
     try {
         const userData = await request.json();
-        console.log('Received user data:', userData);
         
         if (!userData || Object.keys(userData).length === 0) {
             return json(
@@ -58,7 +73,16 @@ export const POST: RequestHandler = async ({ request }) => {
             );
         }
         
-        // Validate user's salary expectation if provided
+        // Create cache key from user data
+        const cacheKey = JSON.stringify(userData);
+        
+        // Check cache first
+        if (recommendationCache.has(cacheKey)) {
+            const cached = recommendationCache.get(cacheKey);
+            return json(cached);
+        }
+        
+        // Validate salary expectation if provided
         if (userData.salaryExpectation) {
             const salaryError = validateSalaryInput(userData.salaryExpectation);
             if (salaryError) {
@@ -69,118 +93,93 @@ export const POST: RequestHandler = async ({ request }) => {
             }
         }
         
-        // Check education level and filter recommendations accordingly
-        const educationLevel = userData.educationLevel?.toLowerCase() || '';
-        const isBelowBachelors = ['high school', 'vocational', 'associate', 'some college', 'secondary', 'other'].includes(educationLevel);
-        const hasBachelors = educationLevel === 'bachelor';
-        const hasAdvancedDegree = ['master', 'doctorate'].includes(educationLevel);
+        // Determine education level
+        const educationLevel = (userData.educationLevel || '').toLowerCase();
+        const isBelowBachelors = EDUCATION_LEVELS.belowBachelors.has(educationLevel);
+        const hasBachelors = EDUCATION_LEVELS.bachelors.has(educationLevel);
+        const hasAdvancedDegree = EDUCATION_LEVELS.advanced.has(educationLevel);
         
-        const analysis = await analyzeWithDeepSeek(userData);
-        console.log('DeepSeek analysis:', analysis);
-        
-        let recommendations = await generateCareerRecommendations(analysis);
-        console.log('Generated recommendations:', recommendations);
-        
-        // Validate and clean recommendation salaries
-        recommendations = recommendations.map(job => {
-            const validatedJob = validateAndCleanJobSalary(job);
-            // Ensure salary is included in the response
-            return {
-                ...validatedJob,
-                salary: validatedJob.salaryRange // Make sure salary is included
-            };
-        });
+        // Process in parallel where possible
+        const [analysis, recommendations] = await Promise.all([
+            analyzeWithDeepSeek(userData, educationLevel),
+            generateCareerRecommendations(userData, educationLevel)
+        ]);
         
         // Filter recommendations based on education level
+        let filteredRecommendations = recommendations;
         if (isBelowBachelors) {
-            recommendations = filterNonDegreeJobs(recommendations);
-            console.log('Filtered recommendations for non-degree holder:', recommendations);
+            filteredRecommendations = filterJobsByCategory(recommendations, 'nonDegree');
         } else if (hasBachelors) {
-            recommendations = filterDegreeRequiredJobs(recommendations);
-            console.log('Filtered recommendations for bachelor degree holder:', recommendations);
+            filteredRecommendations = filterJobsByCategory(recommendations, 'degreeRequired');
         } else if (hasAdvancedDegree) {
-            recommendations = filterAdvancedDegreeJobs(recommendations);
-            console.log('Filtered recommendations for advanced degree holder:', recommendations);
+            filteredRecommendations = filterJobsByCategory(recommendations, 'advancedDegree');
         }
         
-        // Get job links for all recommendations
-        const jobLinks = generateJobLinks(recommendations);
+        // Validate and clean job salaries
+        const validatedRecommendations = filteredRecommendations.map(validateAndCleanJobSalary);
         
-        return json({
+        // Generate job links
+        const jobLinks = generateJobLinks(validatedRecommendations);
+        
+        // Prepare response
+        const response = {
             success: true,
-            recommendations,
+            recommendations: validatedRecommendations,
             analysis,
             jobLinks,
             educationLevel,
             isBelowBachelors
-        });
+        };
+        
+        // Cache the response for 5 minutes
+        recommendationCache.set(cacheKey, response);
+        setTimeout(() => recommendationCache.delete(cacheKey), 5 * 60 * 1000);
+        
+        return json(response);
+        
     } catch (error) {
         console.error('Recommendation error:', error);
+        
+        // Fallback to mock data
         const userData = await request.json();
-        const educationLevel = userData.educationLevel?.toLowerCase() || '';
-        const isBelowBachelors = ['high school', 'vocational', 'associate', 'some college', 'secondary', 'other'].includes(educationLevel);
-        const hasBachelors = educationLevel === 'bachelor';
-        const hasAdvancedDegree = ['master', 'doctorate'].includes(educationLevel);
-
-        // Ensure validateAndCleanJobSalary is declared before this usage
+        const educationLevel = (userData.educationLevel || '').toLowerCase();
+        const isBelowBachelors = EDUCATION_LEVELS.belowBachelors.has(educationLevel);
+        const hasBachelors = EDUCATION_LEVELS.bachelors.has(educationLevel);
+        const hasAdvancedDegree = EDUCATION_LEVELS.advanced.has(educationLevel);
+        
         let mockRecommendations = generateMockRecommendations(userData);
-        mockRecommendations = mockRecommendations.map(job => {
-            const validatedJob = validateAndCleanJobSalary(job);
-            return {
-                ...validatedJob,
-                salary: validatedJob.salaryRange // Make sure salary is included
-            };
-        });
-
-        // Filter mock recommendations based on education level
+        
         if (isBelowBachelors) {
-            mockRecommendations = filterNonDegreeJobs(mockRecommendations);
+            mockRecommendations = filterJobsByCategory(mockRecommendations, 'nonDegree');
         } else if (hasBachelors) {
-            mockRecommendations = filterDegreeRequiredJobs(mockRecommendations);
+            mockRecommendations = filterJobsByCategory(mockRecommendations, 'degreeRequired');
         } else if (hasAdvancedDegree) {
-            mockRecommendations = filterAdvancedDegreeJobs(mockRecommendations);
+            mockRecommendations = filterJobsByCategory(mockRecommendations, 'advancedDegree');
         }
-
-        const mockJobLinks = generateJobLinks(mockRecommendations);
-
+        
+        const validatedMockRecommendations = mockRecommendations.map(validateAndCleanJobSalary);
+        const mockJobLinks = generateJobLinks(validatedMockRecommendations);
+        
         return json({
             success: true,
-            recommendations: mockRecommendations,
+            recommendations: validatedMockRecommendations,
             jobLinks: mockJobLinks,
             note: 'Using sample data due to API issues'
         });
     }
 };
 
-function filterNonDegreeJobs(recommendations: any[]): any[] {
+function filterJobsByCategory(recommendations: any[], category: keyof typeof JOB_CATEGORIES): any[] {
+    const targetJobs = JOB_CATEGORIES[category];
     return recommendations.filter(job => 
-        NON_DEGREE_JOBS.some(nonDegreeJob => 
-            job.title.toLowerCase().includes(nonDegreeJob.toLowerCase()) ||
-            nonDegreeJob.toLowerCase().includes(job.title.toLowerCase())
+        targetJobs.some(targetJob => 
+            job.title.toLowerCase().includes(targetJob) ||
+            targetJob.includes(job.title.toLowerCase())
         )
     );
 }
 
-function filterDegreeRequiredJobs(recommendations: any[]): any[] {
-    return recommendations.filter(job => 
-        DEGREE_REQUIRED_JOBS.some(degreeJob => 
-            job.title.toLowerCase().includes(degreeJob.toLowerCase()) ||
-            degreeJob.toLowerCase().includes(job.title.toLowerCase())
-        )
-    );
-}
-
-function filterAdvancedDegreeJobs(recommendations: any[]): any[] {
-    return recommendations.filter(job => 
-        ADVANCED_DEGREE_JOBS.some(advancedJob => 
-            job.title.toLowerCase().includes(advancedJob.toLowerCase()) ||
-            advancedJob.toLowerCase().includes(job.title.toLowerCase())
-        )
-    );
-}
-
-async function analyzeWithDeepSeek(userData: any): Promise<string> {
-    const educationLevel = userData.educationLevel || 'Not specified';
+async function analyzeWithDeepSeek(userData: any, educationLevel: string): Promise<string> {
     const prompt = `Analyze this user profile for career recommendations:
     
     User Profile:
@@ -196,11 +195,11 @@ async function analyzeWithDeepSeek(userData: any): Promise<string> {
     - Collaboration Preference: ${userData.collaboration || 'Not specified'}
     
     Provide your analysis in clear, structured markdown format. 
-    ${['highschool', 'associate', 'vocational', 'other'].includes(educationLevel.toLowerCase()) ? 
+    ${EDUCATION_LEVELS.belowBachelors.has(educationLevel) ? 
       'NOTE: User has education below bachelor degree - recommend only jobs that typically do not require a bachelor degree.' : ''}
-    ${educationLevel.toLowerCase() === 'bachelor' ? 
+    ${EDUCATION_LEVELS.bachelors.has(educationLevel) ? 
       'NOTE: User has a bachelor degree - recommend jobs that typically require at least a bachelor degree.' : ''}
-    ${['master', 'doctorate'].includes(educationLevel.toLowerCase()) ? 
+    ${EDUCATION_LEVELS.advanced.has(educationLevel) ? 
       'NOTE: User has an advanced degree - recommend jobs that typically require master or doctorate degrees.' : ''}`;
 
     const response = await fetch('https://openrouter.ai/api/v1/chat/completions', {
@@ -217,11 +216,11 @@ async function analyzeWithDeepSeek(userData: any): Promise<string> {
                 {
                     role: 'system',
                     content: `You are a career guidance expert that helps users find ideal career paths based on their education, skills, and preferences. 
-                    ${['highschool', 'associate', 'vocational', 'other'].includes(educationLevel.toLowerCase()) ? 
+                    ${EDUCATION_LEVELS.belowBachelors.has(educationLevel) ? 
                     'IMPORTANT: The user has education below bachelor degree. Only recommend jobs that typically do not require a bachelor degree.' : ''}
-                    ${educationLevel.toLowerCase() === 'bachelor' ? 
+                    ${EDUCATION_LEVELS.bachelors.has(educationLevel) ? 
                     'IMPORTANT: The user has a bachelor degree. Only recommend jobs that typically require at least a bachelor degree.' : ''}
-                    ${['master', 'doctorate'].includes(educationLevel.toLowerCase()) ? 
+                    ${EDUCATION_LEVELS.advanced.has(educationLevel) ? 
                     'IMPORTANT: The user has an advanced degree. Only recommend jobs that typically require master or doctorate degrees.' : ''}
                     Provide detailed, personalized analysis and recommendations.`
                 },
@@ -243,91 +242,95 @@ async function analyzeWithDeepSeek(userData: any): Promise<string> {
     return result.choices[0]?.message?.content || 'No analysis available';
 }
 
-async function generateCareerRecommendations(analysis: string): Promise<any[]> {
-    // Extract education level from analysis to ensure proper filtering
-    const educationLevelMatch = analysis.match(/Education Level: ([^\n]+)/i);
-    const educationLevel = educationLevelMatch ? educationLevelMatch[1].toLowerCase() : '';
-    
-    const prompt = `Based on this career analysis, generate 5-10 specific job recommendations with details:
-    
-    Career Analysis:
-    ${analysis}
-    
-    For each recommendation, provide:
-    - Job Title (must be realistic based on education level)
-    - Industry/Sector
-    - Typical Responsibilities
-    - Required Skills
-    - Expected Salary Range (in Philippine Peso)
-    - Growth Potential
-    - Why it matches the user's profile
-    
-    Return only raw JSON format (no markdown) with this structure:
-    {
-        "recommendations": [
-            {
-                "title": "",
-                "industry": "",
-                "responsibilities": "",
-                "requiredSkills": [],
-                "salaryRange": "",
-                "growthPotential": "",
-                "matchReason": "",
-                "matchPercentage": 0
-            }
-        ]
-    }
-    
-    IMPORTANT: ${['highschool', 'associate', 'vocational', 'other'].includes(educationLevel) ? 
-    'Only include jobs that typically do not require a bachelor degree.' : ''}
-    ${educationLevel === 'bachelor' ? 
-    'Only include jobs that typically require at least a bachelor degree.' : ''}
-    ${['master', 'doctorate'].includes(educationLevel) ? 
-    'Only include jobs that typically require master or doctorate degrees.' : ''}`;
-
-    const response = await fetch('https://openrouter.ai/api/v1/chat/completions', {
-        method: 'POST',
-        headers: {
-            'Authorization': `Bearer ${OPENROUTER_API_KEY}`,
-            'Content-Type': 'application/json',
-            'HTTP-Referer': 'https://your-site.com',
-            'X-Title': 'CareerGenie'
-        },
-        body: JSON.stringify({
-            model: 'deepseek/deepseek-r1-0528:free',
-            messages: [
-                {
-                    role: 'system',
-                    content: `You generate specific career recommendations based on analysis. 
-                    ${['highschool', 'associate', 'vocational', 'other'].includes(educationLevel) ? 
-                    'ONLY recommend jobs that don\'t require a bachelor degree.' : ''}
-                    ${educationLevel === 'bachelor' ? 
-                    'ONLY recommend jobs that require at least a bachelor degree.' : ''}
-                    ${['master', 'doctorate'].includes(educationLevel) ? 
-                    'ONLY recommend jobs that require master or doctorate degrees.' : ''}
-                    Provide ONLY raw JSON output without any markdown formatting or additional text. 
-                    All salary ranges must be in Philippine Peso (₱). 
-                    Include a matchPercentage (85-95 for top matches, 70-84 for good matches, below 70 for alternate paths).`
-                },
-                {
-                    role: 'user',
-                    content: prompt
-                }
-            ],
-            temperature: 0.5,
-            response_format: { type: "json_object" }
-        })
-    });
-
-    if (!response.ok) {
-        throw new Error(`API request failed with status ${response.status}`);
-    }
-
-    const result = await response.json();
-    let content: string | undefined;
+async function generateCareerRecommendations(userData: any, educationLevel: string): Promise<any[]> {
+    // First try to get recommendations from AI
     try {
-        content = result.choices[0]?.message?.content;
-        if (!content) return generateMockRecommendations({ educationLevel });
+        const prompt = `Based on the user profile, generate 5-10 specific job recommendations with details:
+        
+        User Profile:
+        - Education Level: ${educationLevel}
+        - Work Types: ${userData.workTypes?.join(', ') || 'Not specified'}
+        - Salary Expectation: ${userData.salaryExpectation || 'Not specified'}
+        - Strengths: ${userData.strengths?.join(', ') || 'Not specified'}
+        - Experience Level: ${userData.experienceLevel || 'Not specified'}
+        - Technical Skills: ${userData.technicalSkills?.join(', ') || 'Not specified'}
+        
+        For each recommendation, provide:
+        - Job Title (must be realistic based on education level)
+        - Industry/Sector
+        - Typical Responsibilities
+        - Required Skills
+        - Expected Salary Range (in Philippine Peso)
+        - Growth Potential
+        - Why it matches the user's profile
+        
+        Return only raw JSON format (no markdown) with this structure:
+        {
+            "recommendations": [
+                {
+                    "title": "",
+                    "industry": "",
+                    "responsibilities": "",
+                    "requiredSkills": [],
+                    "salaryRange": "",
+                    "growthPotential": "",
+                    "matchReason": "",
+                    "matchPercentage": 0
+                }
+            ]
+        }
+        
+        IMPORTANT: ${EDUCATION_LEVELS.belowBachelors.has(educationLevel) ? 
+        'Only include jobs that typically do not require a bachelor degree.' : ''}
+        ${EDUCATION_LEVELS.bachelors.has(educationLevel) ? 
+        'Only include jobs that typically require at least a bachelor degree.' : ''}
+        ${EDUCATION_LEVELS.advanced.has(educationLevel) ? 
+        'Only include jobs that typically require master or doctorate degrees.' : ''}`;
+
+        const response = await fetch('https://openrouter.ai/api/v1/chat/completions', {
+            method: 'POST',
+            headers: {
+                'Authorization': `Bearer ${OPENROUTER_API_KEY}`,
+                'Content-Type': 'application/json',
+                'HTTP-Referer': 'https://your-site.com',
+                'X-Title': 'CareerGenie'
+            },
+            body: JSON.stringify({
+                model: 'deepseek/deepseek-r1-0528:free',
+                messages: [
+                    {
+                        role: 'system',
+                        content: `You generate specific career recommendations based on user profiles. 
+                        ${EDUCATION_LEVELS.belowBachelors.has(educationLevel) ? 
+                        'ONLY recommend jobs that don\'t require a bachelor degree.' : ''}
+                        ${EDUCATION_LEVELS.bachelors.has(educationLevel) ? 
+                        'ONLY recommend jobs that require at least a bachelor degree.' : ''}
+                        ${EDUCATION_LEVELS.advanced.has(educationLevel) ? 
+                        'ONLY recommend jobs that require master or doctorate degrees.' : ''}
+                        Provide ONLY raw JSON output without any markdown formatting or additional text. 
+                        All salary ranges must be in Philippine Peso (₱). 
+                        Include a matchPercentage (85-95 for top matches, 70-84 for good matches, below 70 for alternate paths).`
+                    },
+                    {
+                        role: 'user',
+                        content: prompt
+                    }
+                ],
+                temperature: 0.5,
+                response_format: { type: "json_object" }
+            })
+        });
+
+        if (!response.ok) {
+            throw new Error(`API request failed with status ${response.status}`);
+        }
+
+        const result = await response.json();
+        const content = result.choices[0]?.message?.content;
+        
+        if (!content) {
+            return generateMockRecommendations(userData);
+        }
         
         // Handle both direct JSON and markdown-wrapped JSON
         let jsonString = content;
@@ -336,14 +339,22 @@ async function generateCareerRecommendations(analysis: string): Promise<any[]> {
         
         const parsed = JSON.parse(jsonString);
         return parsed.recommendations || parsed.jobs || [];
+        
     } catch (e) {
-        console.error('Failed to parse recommendations:', e);
-        console.error('Original content:', content);
-        return generateMockRecommendations({ educationLevel });
+        console.error('Failed to get AI recommendations:', e);
+        return generateMockRecommendations(userData);
     }
 }
 
 function generateJobLinks(recommendations: any[]): string[] {
+    const jobSites = [
+        (title: string, location: string) => `https://www.linkedin.com/jobs/search/?keywords=${title}&location=${location}&geoId=103121230&f_TPR=r86400`,
+        (title: string, location: string) => `https://ph.indeed.com/jobs?q=${title}&l=${location}&fromage=7`,
+        (title: string, location: string) => `https://www.jobstreet.com.ph/jobs?keywords=${title}&location=${location}&sortBy=createdAt`,
+        (title: string, location: string) => `https://www.kalibrr.com/job-board/te/1/job-search?query=${title}`,
+        (title: string, location: string) => `https://www.monster.com.ph/jobs/search?q=${title}&where=${location}&tm=r`
+    ];
+    
     return recommendations.map((job, index) => {
         const cleanTitle = job.title
             .replace(/[^\w\s]/g, '')
@@ -353,24 +364,16 @@ function generateJobLinks(recommendations: any[]): string[] {
         const encodedTitle = encodeURIComponent(cleanTitle);
         const location = encodeURIComponent('Philippines');
         
-        const sites = [
-            () => `https://www.linkedin.com/jobs/search/?keywords=${encodedTitle}&location=${location}&geoId=103121230&f_TPR=r86400`,
-            () => `https://ph.indeed.com/jobs?q=${encodedTitle}&l=Philippines&fromage=7`,
-            () => `https://www.jobstreet.com.ph/jobs?keywords=${encodedTitle}&location=Philippines&sortBy=createdAt`,
-            () => `https://www.kalibrr.com/job-board/te/1/job-search?query=${encodedTitle}`,
-            () => `https://www.monster.com.ph/jobs/search?q=${encodedTitle}&where=Philippines&tm=r`
-        ];
-        
-        const siteIndex = index % sites.length;
-        return sites[siteIndex]();
+        const siteIndex = index % jobSites.length;
+        return jobSites[siteIndex](encodedTitle, location);
     });
 }
 
 function generateMockRecommendations(userData: any) {
-    const educationLevel = userData.educationLevel?.toLowerCase() || '';
-    const isBelowBachelors = ['highschool', 'vocational', 'associate', 'other'].includes(educationLevel);
-    const hasBachelors = educationLevel === 'bachelor';
-    const hasAdvancedDegree = ['master', 'doctorate'].includes(educationLevel);
+    const educationLevel = (userData.educationLevel || '').toLowerCase();
+    const isBelowBachelors = EDUCATION_LEVELS.belowBachelors.has(educationLevel);
+    const hasBachelors = EDUCATION_LEVELS.bachelors.has(educationLevel);
+    const hasAdvancedDegree = EDUCATION_LEVELS.advanced.has(educationLevel);
     
     if (isBelowBachelors) {
         return [
@@ -393,36 +396,6 @@ function generateMockRecommendations(userData: any) {
                 growthPotential: 'Can lead to office manager or executive assistant roles',
                 matchReason: 'Aligns with your organizational skills and work setting preferences',
                 matchPercentage: 85
-            },
-            {
-                title: 'Retail Sales Associate',
-                industry: 'Retail',
-                responsibilities: 'Assist customers, process transactions, maintain store appearance',
-                requiredSkills: ['Customer Service', 'Basic Math', 'Product Knowledge'],
-                salaryRange: '₱12,000 - ₱20,000 per month',
-                growthPotential: 'Opportunity to become store supervisor or manager',
-                matchReason: 'Matches your interpersonal skills and work motivation',
-                matchPercentage: 82
-            },
-            {
-                title: 'Food Service Worker',
-                industry: 'Hospitality',
-                responsibilities: 'Prepare food, serve customers, maintain cleanliness',
-                requiredSkills: ['Teamwork', 'Hygiene Standards', 'Customer Service'],
-                salaryRange: '₱12,000 - ₱18,000 per month',
-                growthPotential: 'Can progress to chef or restaurant manager positions',
-                matchReason: 'Aligns with your ability to work in fast-paced environments',
-                matchPercentage: 78
-            },
-            {
-                title: 'Warehouse Associate',
-                industry: 'Logistics',
-                responsibilities: 'Receive and process inventory, prepare orders, maintain storage areas',
-                requiredSkills: ['Physical Stamina', 'Attention to Detail', 'Teamwork'],
-                salaryRange: '₱15,000 - ₱22,000 per month',
-                growthPotential: 'Can move into supervisory or logistics coordinator roles',
-                matchReason: 'Matches your preference for hands-on work and collaboration style',
-                matchPercentage: 80
             }
         ];
     } else if (hasBachelors) {
@@ -450,36 +423,6 @@ function generateMockRecommendations(userData: any) {
                 growthPotential: 'High demand across industries with opportunities in AI/ML',
                 matchReason: 'Matches your analytical skills and technical background',
                 matchPercentage: 85
-            },
-            {
-                title: 'Marketing Specialist',
-                industry: 'Marketing',
-                responsibilities: 'Develop marketing strategies, analyze market trends, coordinate campaigns',
-                requiredSkills: ['Communication', 'Creativity', 'Analytics'],
-                salaryRange: isEntryLevel ? '₱20,000 - ₱30,000 per month' : '₱40,000 - ₱80,000 per month',
-                growthPotential: 'Growing field with opportunities to become marketing manager',
-                matchReason: 'Aligns with your creative and analytical skills',
-                matchPercentage: 82
-            },
-            {
-                title: 'Human Resources Associate',
-                industry: 'HR',
-                responsibilities: 'Assist with recruitment, employee relations, benefits administration',
-                requiredSkills: ['Communication', 'Organization', 'Conflict Resolution'],
-                salaryRange: isEntryLevel ? '₱20,000 - ₱30,000 per month' : '₱40,000 - ₱70,000 per month',
-                growthPotential: 'Opportunity to move into HR management roles',
-                matchReason: 'Matches your interpersonal skills and work motivation',
-                matchPercentage: 80
-            },
-            {
-                title: 'Financial Analyst',
-                industry: 'Finance',
-                responsibilities: 'Analyze financial data, prepare reports, provide investment recommendations',
-                requiredSkills: ['Financial Analysis', 'Excel', 'Attention to Detail'],
-                salaryRange: isEntryLevel ? '₱25,000 - ₱35,000 per month' : '₱50,000 - ₱90,000 per month',
-                growthPotential: 'Opportunity to move into senior financial roles',
-                matchReason: 'Aligns with your analytical skills and education background',
-                matchPercentage: 85
             }
         ];
     } else if (hasAdvancedDegree) {
@@ -503,41 +446,10 @@ function generateMockRecommendations(userData: any) {
                 growthPotential: 'High demand with opportunities in AI research',
                 matchReason: 'Aligns with your advanced analytical skills',
                 matchPercentage: 90
-            },
-            {
-                title: 'University Professor',
-                industry: 'Education',
-                responsibilities: 'Teach courses, conduct research, publish academic papers, mentor students',
-                requiredSkills: ['Subject Expertise', 'Research', 'Teaching'],
-                salaryRange: '₱80,000 - ₱150,000 per month',
-                growthPotential: 'Opportunity to become department head or dean',
-                matchReason: 'Matches your advanced education and subject knowledge',
-                matchPercentage: 88
-            },
-            {
-                title: 'Senior Research Scientist',
-                industry: 'Science/Technology',
-                responsibilities: 'Lead research projects, secure funding, publish findings, mentor junior researchers',
-                requiredSkills: ['Research Methodology', 'Data Analysis', 'Grant Writing'],
-                salaryRange: '₱90,000 - ₱180,000 per month',
-                growthPotential: 'Opportunity to become research director',
-                matchReason: 'Aligns with your research skills and advanced education',
-                matchPercentage: 85
-            },
-            {
-                title: 'Medical Director',
-                industry: 'Healthcare',
-                responsibilities: 'Oversee clinical operations, develop policies, ensure quality care, lead medical staff',
-                requiredSkills: ['Medical Expertise', 'Leadership', 'Healthcare Administration'],
-                salaryRange: '₱150,000 - ₱300,000 per month',
-                growthPotential: 'Opportunity to move into executive healthcare roles',
-                matchReason: 'Matches your advanced medical training and leadership potential',
-                matchPercentage: 90
             }
         ];
     }
     
-    // Default return (shouldn't reach here with proper education level)
     return [];
 }
 
@@ -545,11 +457,8 @@ function generateMockRecommendations(userData: any) {
 function validateSalaryInput(salaryInput: string): string | null {
     if (!salaryInput) return null;
     
-    const monthlyPattern = /(?:₱|php|pesos?)\s*([\d,]+)(?:\s*-\s*([\d,]+))?\s*(?:per\s*month|monthly)/i;
-    const annualPattern = /(?:₱|php|pesos?)\s*([\d,]+)(?:\s*-\s*([\d,]+))?\s*(?:per\s*year|annually)/i;
-    
-    const monthlyMatch = salaryInput.match(monthlyPattern);
-    const annualMatch = salaryInput.match(annualPattern);
+    const monthlyMatch = salaryInput.match(SALARY_PATTERNS.monthly);
+    const annualMatch = salaryInput.match(SALARY_PATTERNS.annual);
     
     if (!monthlyMatch && !annualMatch) {
         return 'Please specify salary in format like "₱20,000-₱30,000 per month" or "₱500,000 annually"';
@@ -560,13 +469,13 @@ function validateSalaryInput(salaryInput: string): string | null {
             const min = parseNumber(monthlyMatch[1]);
             const max = monthlyMatch[2] ? parseNumber(monthlyMatch[2]) : min;
             
-            if (min < MIN_MONTHLY_SALARY_PHP) {
-                return `Salary seems too low (minimum expected is ₱${MIN_MONTHLY_SALARY_PHP.toLocaleString()} monthly)`;
+            if (min < SALARY_CONSTANTS.minMonthly) {
+                return `Salary seems too low (minimum expected is ₱${SALARY_CONSTANTS.minMonthly.toLocaleString()} monthly)`;
             }
-            if (max > MAX_MONTHLY_SALARY_PHP) {
-                return `Salary seems unrealistically high (maximum expected is ₱${MAX_MONTHLY_SALARY_PHP.toLocaleString()} monthly)`;
+            if (max > SALARY_CONSTANTS.maxMonthly) {
+                return `Salary seems unrealistically high (maximum expected is ₱${SALARY_CONSTANTS.maxMonthly.toLocaleString()} monthly)`;
             }
-            if (max < min * (1 + SALARY_RANGE_THRESHOLD)) {
+            if (max < min * (1 + SALARY_CONSTANTS.rangeThreshold)) {
                 return 'Salary range should show meaningful progression (e.g., ₱20,000-₱30,000)';
             }
         }
@@ -577,13 +486,13 @@ function validateSalaryInput(salaryInput: string): string | null {
             const minMonthly = min / 12;
             const maxMonthly = max / 12;
             
-            if (minMonthly < MIN_MONTHLY_SALARY_PHP) {
+            if (minMonthly < SALARY_CONSTANTS.minMonthly) {
                 return `Annual salary translates to ₱${minMonthly.toLocaleString(undefined, {maximumFractionDigits: 0})} monthly, which is below minimum expected`;
             }
-            if (maxMonthly > MAX_MONTHLY_SALARY_PHP) {
+            if (maxMonthly > SALARY_CONSTANTS.maxMonthly) {
                 return `Annual salary translates to ₱${maxMonthly.toLocaleString(undefined, {maximumFractionDigits: 0})} monthly, which is unrealistically high`;
             }
-            if (max < min * (1 + SALARY_RANGE_THRESHOLD)) {
+            if (max < min * (1 + SALARY_CONSTANTS.rangeThreshold)) {
                 return 'Annual salary range should show meaningful progression (e.g., ₱300,000-₱400,000)';
             }
         }
@@ -604,15 +513,13 @@ function validateAndCleanJobSalary(job: any): any {
         const standardized = standardizeSalaryFormat(job.salaryRange);
         const parsed = parseSalaryRange(standardized);
         
-        if (parsed.min < MIN_MONTHLY_SALARY_PHP / (parsed.isAnnual ? 12 : 1)) {
-            console.warn(`Salary for ${job.title} seems too low: ${job.salaryRange}`);
-            parsed.min = MIN_MONTHLY_SALARY_PHP * (parsed.isAnnual ? 12 : 1);
+        if (parsed.min < SALARY_CONSTANTS.minMonthly / (parsed.isAnnual ? 12 : 1)) {
+            parsed.min = SALARY_CONSTANTS.minMonthly * (parsed.isAnnual ? 12 : 1);
             if (parsed.max < parsed.min) parsed.max = parsed.min * 1.5;
         }
         
-        if (parsed.max > MAX_MONTHLY_SALARY_PHP * (parsed.isAnnual ? 12 : 1)) {
-            console.warn(`Salary for ${job.title} seems too high: ${job.salaryRange}`);
-            parsed.max = MAX_MONTHLY_SALARY_PHP * (parsed.isAnnual ? 12 : 1);
+        if (parsed.max > SALARY_CONSTANTS.maxMonthly * (parsed.isAnnual ? 12 : 1)) {
+            parsed.max = SALARY_CONSTANTS.maxMonthly * (parsed.isAnnual ? 12 : 1);
             if (parsed.min > parsed.max) parsed.min = parsed.max * 0.7;
         }
         
@@ -621,19 +528,19 @@ function validateAndCleanJobSalary(job: any): any {
         
         return job;
     } catch (e) {
-        console.error(`Failed to parse salary for ${job.title}: ${job.salaryRange}`, e);
         job.salaryRange = generateRealisticSalary(job.title, job.industry);
         return job;
     }
 }
 
 function standardizeSalaryFormat(salaryStr: string): string {
-    let standardized = salaryStr.toLowerCase().replace(/\s+/g, ' ').trim();
-    standardized = standardized.replace(/(php|pesos?|p)/g, '₱');
-    standardized = standardized.replace(/(?:per\s*)?(month|mo|monthly)/g, 'per month');
-    standardized = standardized.replace(/(?:per\s*)?(year|yr|annually)/g, 'per year');
-    standardized = standardized.replace(/(₱[\d,]+)\s*(?:to|-|–|—)\s*(₱[\d,]+)/g, '$1-$2');
-    return standardized;
+    return salaryStr.toLowerCase()
+        .replace(/\s+/g, ' ')
+        .trim()
+        .replace(/(php|pesos?|p)/g, '₱')
+        .replace(/(?:per\s*)?(month|mo|monthly)/g, 'per month')
+        .replace(/(?:per\s*)?(year|yr|annually)/g, 'per year')
+        .replace(/(₱[\d,]+)\s*(?:to|-|–|—)\s*(₱[\d,]+)/g, '$1-$2');
 }
 
 function parseSalaryRange(salaryStr: string): {
@@ -669,13 +576,13 @@ function formatSalaryRange(min: number, max: number, isAnnual: boolean): string 
 }
 
 function generateRealisticSalary(title: string, industry: string): string {
-    const salaryData = {
+    const salaryData: Record<string, {min: number, max: number}> = {
         'Customer Service Representative': { min: 15000, max: 25000 },
         'Administrative Assistant': { min: 15000, max: 25000 },
         'Software Developer': { min: 25000, max: 40000 },
         'Senior Software Developer': { min: 60000, max: 120000 },
         'Data Analyst': { min: 25000, max: 40000 },
-        'Senior Data Scientist': {min: 100000, max: 200000 },
+        'Senior Data Scientist': { min: 100000, max: 200000 },
         'Retail Sales Associate': { min: 12000, max: 20000 },
         'Food Service Worker': { min: 12000, max: 18000 },
         'Warehouse Associate': { min: 15000, max: 22000 },
@@ -703,14 +610,14 @@ function generateRealisticSalary(title: string, industry: string): string {
             return entryLevel 
                 ? '₱25,000-₱40,000 per month' 
                 : seniorLevel 
-                    ? '极狐 80,000-₱150,000 per month' 
+                    ? '₱80,000-₱150,000 per month' 
                     : '₱40,000-₱80,000 per month';
         case 'retail':
             return '₱12,000-₱20,000 per month';
         case 'hospitality':
             return '₱12,000-₱18,000 per month';
         case 'marketing':
-            return entryLevel ? '₱20,000-极狐 30,000 per month' : '₱40,000-₱80,000 per month';
+            return entryLevel ? '₱20,000-₱30,000 per month' : '₱40,000-₱80,000 per month';
         case 'education':
             return seniorLevel ? '₱80,000-₱150,000 per month' : '₱25,000-₱50,000 per month';
         case 'healthcare':
