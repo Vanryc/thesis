@@ -1,7 +1,11 @@
-// src/routes/api/job-recommendations/+server.ts
 import { json } from '@sveltejs/kit';
 import type { RequestHandler } from './$types';
 import { OPENROUTER_API_KEY } from '$env/static/private';
+
+// Rate limiting setup
+const rateLimitMap = new Map();
+const RATE_LIMIT_WINDOW = 60000; // 1 minute
+const MAX_REQUESTS_PER_WINDOW = 5; // Reduced to prevent API rate limiting
 
 // Pre-compiled regex patterns for better performance
 const SALARY_PATTERNS = {
@@ -17,7 +21,7 @@ const JOB_CATEGORIES = {
         'housekeeper', 'cashier', 'receptionist', 'data entry clerk', 'caregiver',
         'construction worker', 'electrician', 'plumber', 'automotive technician',
         'hair stylist', 'beautician', 'medical assistant', 'pharmacy technician',
-        'dental assistant', 'hvac technician', 'welder', 'machinist', 'carpenter',
+        'dental assistant', 'hvac technician', 'welder', 'machinist', 'carpenenter',
         'painter', 'landscaper', 'janitor', 'cook', 'bartender', 'barista',
         'bank teller', 'call center agent', 'freelance writer', 'graphic designer',
         'web designer', 'social media manager', 'photographer', 'fitness trainer',
@@ -55,16 +59,125 @@ const SALARY_CONSTANTS = {
 // Education level categorization
 const EDUCATION_LEVELS = {
     belowBachelors: new Set(['high school', 'vocational', 'associate', 'some college', 'secondary', 'other', 'highschool']),
-    bachelors: new Set(['bachelor']),
-    advanced: new Set(['master', 'doctorate'])
+    bachelors: new Set(['bachelor', 'bachelor\'s', 'bachelors']),
+    advanced: new Set(['master', 'master\'s', 'masters', 'doctorate', 'phd', 'doctoral'])
 };
+
+// Valid work types
+const VALID_WORK_TYPES = new Set([
+    'full-time', 'part-time', 'contract', 'freelance', 'remote', 'hybrid', 'onsite', 'creative'
+]);
+
+// Valid experience levels
+const VALID_EXPERIENCE_LEVELS = new Set([
+    'entry', 'junior', 'mid', 'senior', 'lead', 'executive'
+]);
+
+// Valid collaboration preferences
+const VALID_COLLABORATION_PREFS = new Set([
+    'team', 'individual', 'mixed', 'both'
+]);
+
+// Valid work settings
+const VALID_WORK_SETTINGS = new Set([
+    'office', 'remote', 'hybrid', 'outdoor', 'field'
+]);
+
+// Valid stress handling levels
+const VALID_STRESS_LEVELS = new Set([
+    'low', 'medium', 'high', 'very high'
+]);
 
 // Cache for job recommendations to avoid redundant API calls
 const recommendationCache = new Map();
 
-export const POST: RequestHandler = async ({ request }) => {
+// User data interface for better type safety
+interface UserData {
+    workTypes?: string[];
+    salaryExpectation?: string;
+    workMotivation?: string;
+    educationLevel?: string;
+    educationField?: string;
+    workExperience?: string;
+    preferredCompanySize?: string;
+    strengths?: string[];
+    experienceLevel?: string;
+    technicalSkills?: string[];
+    certifications?: string[];
+    workSetting?: string;
+    stressHandling?: string;
+    collaborationPreference?: string;
+    workSchedule?: string;
+    managementPreference?: string;
+    workPace?: string;
+}
+
+// Rate limiting function
+function checkRateLimit(ip: string): boolean {
+    const now = Date.now();
+    const windowStart = now - RATE_LIMIT_WINDOW;
+    
+    // Clean up old entries
+    for (const [key, timestamps] of rateLimitMap.entries()) {
+        const filtered = timestamps.filter((timestamp: number) => timestamp > windowStart);
+        if (filtered.length === 0) {
+            rateLimitMap.delete(key);
+        } else {
+            rateLimitMap.set(key, filtered);
+        }
+    }
+
+    // Check current IP
+    const userTimestamps = rateLimitMap.get(ip) || [];
+    const recentRequests = userTimestamps.filter((timestamp: number) => timestamp > windowStart);
+    
+    if (recentRequests.length >= MAX_REQUESTS_PER_WINDOW) {
+        return false;
+    }
+
+    rateLimitMap.set(ip, [...recentRequests, now]);
+    return true;
+}
+
+export const POST: RequestHandler = async ({ request, getClientAddress }) => {
+    const clientIp = getClientAddress();
+    
+    // Check rate limiting
+    if (!checkRateLimit(clientIp)) {
+        return json(
+            { 
+                success: false, 
+                error: 'Too many requests. Please try again in a minute.',
+                recommendations: generateMockRecommendations({} as UserData),
+                note: 'Using sample data due to rate limiting'
+            },
+            { status: 429 }
+        );
+    }
+    
     try {
-        const userData = await request.json();
+        const userData: UserData = await request.json();
+        
+        // Clean workTypes to ensure only valid values
+        if (userData.workTypes && Array.isArray(userData.workTypes)) {
+            userData.workTypes = userData.workTypes.filter(workType => 
+                VALID_WORK_TYPES.has(workType.toLowerCase())
+            );
+            
+            // If no valid work types remain, set a default
+            if (userData.workTypes.length === 0) {
+                userData.workTypes = ['full-time'];
+            }
+        }
+        
+        // Validate user data structure
+        const validationError = validateUserData(userData);
+        if (validationError) {
+            return json(
+                { success: false, error: validationError },
+                { status: 400 }
+            );
+        }
         
         if (!userData || Object.keys(userData).length === 0) {
             return json(
@@ -100,19 +213,23 @@ export const POST: RequestHandler = async ({ request }) => {
         const hasAdvancedDegree = EDUCATION_LEVELS.advanced.has(educationLevel);
         
         // Process in parallel where possible
-        const [analysis, recommendations] = await Promise.all([
+        const [analysis, recommendations] = await Promise.allSettled([
             analyzeWithDeepSeek(userData, educationLevel),
             generateCareerRecommendations(userData, educationLevel)
         ]);
         
+        // Handle API responses
+        const analysisResult = analysis.status === 'fulfilled' ? analysis.value : 'Analysis temporarily unavailable. Please try again later.';
+        let recommendationsResult = recommendations.status === 'fulfilled' ? recommendations.value : generateMockRecommendations(userData);
+        
         // Filter recommendations based on education level
-        let filteredRecommendations = recommendations;
+        let filteredRecommendations = recommendationsResult;
         if (isBelowBachelors) {
-            filteredRecommendations = filterJobsByCategory(recommendations, 'nonDegree');
+            filteredRecommendations = filterJobsByCategory(recommendationsResult, 'nonDegree');
         } else if (hasBachelors) {
-            filteredRecommendations = filterJobsByCategory(recommendations, 'degreeRequired');
+            filteredRecommendations = filterJobsByCategory(recommendationsResult, 'degreeRequired');
         } else if (hasAdvancedDegree) {
-            filteredRecommendations = filterJobsByCategory(recommendations, 'advancedDegree');
+            filteredRecommendations = filterJobsByCategory(recommendationsResult, 'advancedDegree');
         }
         
         // Validate and clean job salaries
@@ -125,7 +242,7 @@ export const POST: RequestHandler = async ({ request }) => {
         const response = {
             success: true,
             recommendations: validatedRecommendations,
-            analysis,
+            analysis: analysisResult,
             jobLinks,
             educationLevel,
             isBelowBachelors
@@ -141,33 +258,122 @@ export const POST: RequestHandler = async ({ request }) => {
         console.error('Recommendation error:', error);
         
         // Fallback to mock data
-        const userData = await request.json();
-        const educationLevel = (userData.educationLevel || '').toLowerCase();
-        const isBelowBachelors = EDUCATION_LEVELS.belowBachelors.has(educationLevel);
-        const hasBachelors = EDUCATION_LEVELS.bachelors.has(educationLevel);
-        const hasAdvancedDegree = EDUCATION_LEVELS.advanced.has(educationLevel);
-        
-        let mockRecommendations = generateMockRecommendations(userData);
-        
-        if (isBelowBachelors) {
-            mockRecommendations = filterJobsByCategory(mockRecommendations, 'nonDegree');
-        } else if (hasBachelors) {
-            mockRecommendations = filterJobsByCategory(mockRecommendations, 'degreeRequired');
-        } else if (hasAdvancedDegree) {
-            mockRecommendations = filterJobsByCategory(mockRecommendations, 'advancedDegree');
+        try {
+            const userData = await request.json();
+            const educationLevel = (userData.educationLevel || '').toLowerCase();
+            const isBelowBachelors = EDUCATION_LEVELS.belowBachelors.has(educationLevel);
+            const hasBachelors = EDUCATION_LEVELS.bachelors.has(educationLevel);
+            const hasAdvancedDegree = EDUCATION_LEVELS.advanced.has(educationLevel);
+            
+            let mockRecommendations = generateMockRecommendations(userData);
+            
+            if (isBelowBachelors) {
+                mockRecommendations = filterJobsByCategory(mockRecommendations, 'nonDegree');
+            } else if (hasBachelors) {
+                mockRecommendations = filterJobsByCategory(mockRecommendations, 'degreeRequired');
+            } else if (hasAdvancedDegree) {
+                mockRecommendations = filterJobsByCategory(mockRecommendations, 'advancedDegree');
+            }
+            
+            const validatedMockRecommendations = mockRecommendations.map(validateAndCleanJobSalary);
+            const mockJobLinks = generateJobLinks(validatedMockRecommendations);
+            
+            return json({
+                success: true,
+                recommendations: validatedMockRecommendations,
+                jobLinks: mockJobLinks,
+                note: 'Using sample data due to API issues'
+            });
+        } catch (fallbackError) {
+            console.error('Fallback error:', fallbackError);
+            return json(
+                { success: false, error: 'Failed to process request' },
+                { status: 500 }
+            );
         }
-        
-        const validatedMockRecommendations = mockRecommendations.map(validateAndCleanJobSalary);
-        const mockJobLinks = generateJobLinks(validatedMockRecommendations);
-        
-        return json({
-            success: true,
-            recommendations: validatedMockRecommendations,
-            jobLinks: mockJobLinks,
-            note: 'Using sample data due to API issues'
-        });
     }
 };
+
+function validateUserData(userData: UserData): string | null {
+    // Check if userData is an object
+    if (typeof userData !== 'object' || userData === null) {
+        return 'Invalid user data format. Expected an object.';
+    }
+    
+    // Validate and filter workTypes if provided
+    if (userData.workTypes && Array.isArray(userData.workTypes)) {
+        const invalidWorkTypes: string[] = [];
+        
+        // Filter out invalid work types
+        userData.workTypes = userData.workTypes.filter(workType => {
+            if (typeof workType !== 'string') {
+                invalidWorkTypes.push(workType);
+                return false;
+            }
+            
+            const lowerWorkType = workType.toLowerCase();
+            if (!VALID_WORK_TYPES.has(lowerWorkType)) {
+                invalidWorkTypes.push(workType);
+                return false;
+            }
+            return true;
+        });
+        
+        // If we filtered out all work types, provide a helpful error
+        if (userData.workTypes.length === 0 && invalidWorkTypes.length > 0) {
+            return `No valid work types provided. Valid options are: ${Array.from(VALID_WORK_TYPES).join(', ')}`;
+        }
+    }
+    
+    // Validate experience level if provided
+    if (userData.experienceLevel && typeof userData.experienceLevel === 'string') {
+        if (!VALID_EXPERIENCE_LEVELS.has(userData.experienceLevel.toLowerCase())) {
+            return `Invalid experience level: ${userData.experienceLevel}. Valid options are: ${Array.from(VALID_EXPERIENCE_LEVELS).join(', ')}`;
+        }
+    }
+    
+    // Validate collaboration preference if provided
+    if (userData.collaborationPreference && typeof userData.collaborationPreference === 'string') {
+        if (!VALID_COLLABORATION_PREFS.has(userData.collaborationPreference.toLowerCase())) {
+            return `Invalid collaboration preference: ${userData.collaborationPreference}. Valid options are: ${Array.from(VALID_COLLABORATION_PREFS).join(', ')}`;
+        }
+    }
+    
+    // Validate work setting if provided
+    if (userData.workSetting && typeof userData.workSetting === 'string') {
+        if (!VALID_WORK_SETTINGS.has(userData.workSetting.toLowerCase())) {
+            return `Invalid work setting: ${userData.workSetting}. Valid options are: ${Array.from(VALID_WORK_SETTINGS).join(', ')}`;
+        }
+    }
+    
+    // Validate stress handling if provided - map "adaptable" to a valid value
+    if (userData.stressHandling && typeof userData.stressHandling === 'string') {
+        const stressLevel = userData.stressHandling.toLowerCase();
+        
+        // Handle the case where "adaptable" is provided
+        if (stressLevel === 'adaptable') {
+            // Map "adaptable" to "medium" as a reasonable default
+            userData.stressHandling = 'medium';
+        } 
+        else if (!VALID_STRESS_LEVELS.has(stressLevel)) {
+            return `Invalid stress handling level: ${userData.stressHandling}. Valid options are: ${Array.from(VALID_STRESS_LEVELS).join(', ')}`;
+        }
+    }
+    
+    // Validate arrays (strengths, technicalSkills, certifications)
+    const arrayFields = ['strengths', 'technicalSkills', 'certifications'];
+    for (const field of arrayFields) {
+        if (userData[field as keyof UserData] && Array.isArray(userData[field as keyof UserData])) {
+            for (const item of userData[field as keyof UserData] as string[]) {
+                if (typeof item !== 'string') {
+                    return `Invalid ${field}. All items must be strings.`;
+                }
+            }
+        }
+    }
+    
+    return null;
+}
 
 function filterJobsByCategory(recommendations: any[], category: keyof typeof JOB_CATEGORIES): any[] {
     const targetJobs = JOB_CATEGORIES[category];
@@ -179,7 +385,17 @@ function filterJobsByCategory(recommendations: any[], category: keyof typeof JOB
     );
 }
 
-async function analyzeWithDeepSeek(userData: any, educationLevel: string): Promise<string> {
+async function analyzeWithDeepSeek(userData: UserData, educationLevel: string): Promise<string> {
+    // If no API key is provided, return a default analysis
+    if (!OPENROUTER_API_KEY) {
+        return `Based on your profile:
+- Education Level: ${educationLevel}
+- Work Preferences: ${userData.workTypes?.join(', ') || 'Not specified'}
+- Strengths: ${userData.strengths?.join(', ') || 'Not specified'}
+
+I recommend exploring careers that match your skills and interests. Consider roles that align with your preferred work environment and schedule.`;
+    }
+
     const prompt = `Analyze this user profile for career recommendations:
     
     User Profile:
@@ -192,7 +408,7 @@ async function analyzeWithDeepSeek(userData: any, educationLevel: string): Promi
     - Technical Skills: ${userData.technicalSkills?.join(', ') || 'Not specified'}
     - Work Setting Preference: ${userData.workSetting || 'Not specified'}
     - Stress Handling: ${userData.stressHandling || 'Not specified'}
-    - Collaboration Preference: ${userData.collaboration || 'Not specified'}
+    - Collaboration Preference: ${userData.collaborationPreference || 'Not specified'}
     
     Provide your analysis in clear, structured markdown format. 
     ${EDUCATION_LEVELS.belowBachelors.has(educationLevel) ? 
@@ -202,47 +418,60 @@ async function analyzeWithDeepSeek(userData: any, educationLevel: string): Promi
     ${EDUCATION_LEVELS.advanced.has(educationLevel) ? 
       'NOTE: User has an advanced degree - recommend jobs that typically require master or doctorate degrees.' : ''}`;
 
-    const response = await fetch('https://openrouter.ai/api/v1/chat/completions', {
-        method: 'POST',
-        headers: {
-            'Authorization': `Bearer ${OPENROUTER_API_KEY}`,
-            'Content-Type': 'application/json',
-            'HTTP-Referer': 'https://your-site.com',
-            'X-Title': 'CareerGenie'
-        },
-        body: JSON.stringify({
-            model: 'deepseek/deepseek-r1-0528:free',
-            messages: [
-                {
-                    role: 'system',
-                    content: `You are a career guidance expert that helps users find ideal career paths based on their education, skills, and preferences. 
-                    ${EDUCATION_LEVELS.belowBachelors.has(educationLevel) ? 
-                    'IMPORTANT: The user has education below bachelor degree. Only recommend jobs that typically do not require a bachelor degree.' : ''}
-                    ${EDUCATION_LEVELS.bachelors.has(educationLevel) ? 
-                    'IMPORTANT: The user has a bachelor degree. Only recommend jobs that typically require at least a bachelor degree.' : ''}
-                    ${EDUCATION_LEVELS.advanced.has(educationLevel) ? 
-                    'IMPORTANT: The user has an advanced degree. Only recommend jobs that typically require master or doctorate degrees.' : ''}
-                    Provide detailed, personalized analysis and recommendations.`
-                },
-                {
-                    role: 'user',
-                    content: prompt
-                }
-            ],
-            temperature: 0.7,
-            max_tokens: 1500
-        })
-    });
+    try {
+        const response = await fetch('https://openrouter.ai/api/v1/chat/completions', {
+            method: 'POST',
+            headers: {
+                'Authorization': `Bearer ${OPENROUTER_API_KEY}`,
+                'Content-Type': 'application/json',
+                'HTTP-Referer': 'https://your-site.com',
+                'X-Title': 'CareerGenie'
+            },
+            body: JSON.stringify({
+                model: 'deepseek/deepseek-r1-0528:free',
+                messages: [
+                    {
+                        role: 'system',
+                        content: `You are a career guidance expert that helps users find ideal career paths based on their education, skills, and preferences. 
+                        ${EDUCATION_LEVELS.belowBachelors.has(educationLevel) ? 
+                        'IMPORTANT: The user has education below bachelor degree. Only recommend jobs that typically do not require a bachelor degree.' : ''}
+                        ${EDUCATION_LEVELS.bachelors.has(educationLevel) ? 
+                        'IMPORTANT: The user has a bachelor degree. Only recommend jobs that typically require at least a bachelor degree.' : ''}
+                        ${EDUCATION_LEVELS.advanced.has(educationLevel) ? 
+                        'IMPORTANT: The user has an advanced degree. Only recommend jobs that typically require master or doctorate degrees.' : ''}
+                        Provide detailed, personalized analysis and recommendations.`
+                    },
+                    {
+                        role: 'user',
+                        content: prompt
+                    }
+                ],
+                temperature: 0.7,
+                max_tokens: 1500
+            })
+        });
 
-    if (!response.ok) {
-        throw new Error(`API request failed with status ${response.status}`);
+        if (!response.ok) {
+            if (response.status === 429) {
+                throw new Error('API rate limit exceeded. Please try again later.');
+            }
+            throw new Error(`API request failed with status ${response.status}`);
+        }
+
+        const result = await response.json();
+        return result.choices[0]?.message?.content || 'No analysis available';
+    } catch (error) {
+        console.error('DeepSeek analysis error:', error);
+        return 'Analysis temporarily unavailable. Please try again later.';
     }
-
-    const result = await response.json();
-    return result.choices[0]?.message?.content || 'No analysis available';
 }
 
-async function generateCareerRecommendations(userData: any, educationLevel: string): Promise<any[]> {
+async function generateCareerRecommendations(userData: UserData, educationLevel: string): Promise<any[]> {
+    // If no API key is provided, return mock recommendations
+    if (!OPENROUTER_API_KEY) {
+        return generateMockRecommendations(userData);
+    }
+
     // First try to get recommendations from AI
     try {
         const prompt = `Based on the user profile, generate 5-10 specific job recommendations with details:
@@ -322,6 +551,9 @@ async function generateCareerRecommendations(userData: any, educationLevel: stri
         });
 
         if (!response.ok) {
+            if (response.status === 429) {
+                throw new Error('API rate limit exceeded. Please try again later.');
+            }
             throw new Error(`API request failed with status ${response.status}`);
         }
 
@@ -369,7 +601,7 @@ function generateJobLinks(recommendations: any[]): string[] {
     });
 }
 
-function generateMockRecommendations(userData: any) {
+function generateMockRecommendations(userData: UserData) {
     const educationLevel = (userData.educationLevel || '').toLowerCase();
     const isBelowBachelors = EDUCATION_LEVELS.belowBachelors.has(educationLevel);
     const hasBachelors = EDUCATION_LEVELS.bachelors.has(educationLevel);
