@@ -1,6 +1,8 @@
-<!-- Preferences -->
+<!-- Preferences.svelte -->
 <script lang="ts">
-  import { createEventDispatcher } from 'svelte';
+  import { createEventDispatcher, onMount } from 'svelte';
+  import { fade, scale } from 'svelte/transition';
+  
   const dispatch = createEventDispatcher();
 
   // Type definitions for better type safety
@@ -13,6 +15,8 @@
     workExperience: string;
     preferredCompanySize: string;
   };
+
+  type ToastType = 'success' | 'warning' | 'info';
 
   // Initialize with default values
   export let data: WorkPreferenceData = {
@@ -27,34 +31,37 @@
 
   export let progressWidth = '33%';
 
-  // Track form completion state
-  let formPartCompleted = false;
+  // Reactive state
+  let searchQuery = '';
+  let isLoading = false;
+  let selectedCategory = 'all';
+  let activeToast: { message: string; type: ToastType } | null = null;
   let showEducationField = false;
 
   // Constants for options
   const WORK_TYPE_LIMIT = 3;
   
   const workTypeOptions = [
-    { id: 'creative', label: 'Creative', value: 'creative', icon: 'bx-palette', description: 'Design, writing, arts' },
-    { id: 'analytical', label: 'Analytical', value: 'analytical', icon: 'bx-stats', description: 'Data analysis, research' },
-    { id: 'technical', label: 'Technical', value: 'technical', icon: 'bx-code-alt', description: 'Engineering, programming' },
-    { id: 'handsOn', label: 'Hands-on', value: 'handsOn', icon: 'bx-wrench', description: 'Construction, manufacturing' },
-    { id: 'social', label: 'Social', value: 'social', icon: 'bx-group', description: 'Teaching, counseling, service' },
-    { id: 'structured', label: 'Structured', value: 'structured', icon: 'bx-list-check', description: 'Accounting, administration' },
-    { id: 'leadership', label: 'Leadership', value: 'leadership', icon: 'bx-trending-up', description: 'Team leading, management' },
-    { id: 'entrepreneurial', label: 'Entrepreneurial', value: 'entrepreneurial', icon: 'bx-bulb', description: 'Startups, business' },
-    { id: 'scientific', label: 'Scientific', value: 'scientific', icon: 'bx-test-tube', description: 'Biology, chemistry' },
-    { id: 'healthcare', label: 'Healthcare', value: 'healthcare', icon: 'bx-plus-medical', description: 'Nursing, medicine' },
-    { id: 'outdoor', label: 'Outdoor', value: 'outdoor', icon: 'bx-street-view', description: 'Agriculture, forestry' },
-    { id: 'digital', label: 'Digital', value: 'digital', icon: 'bx-globe', description: 'Online work, remote' },
-    { id: 'logistical', label: 'Logistical', value: 'logistical', icon: 'bx-package', description: 'Supply chain, operations' },
-    { id: 'artistic', label: 'Artistic', value: 'artistic', icon: 'bx-music', description: 'Performing, visual arts' },
-    { id: 'financial', label: 'Financial', value: 'financial', icon: 'bx-dollar', description: 'Banking, investment' },
-    { id: 'legal', label: 'Legal', value: 'legal', icon: 'bx-registered', description: 'Law, compliance' },
-    { id: 'educational', label: 'Educational', value: 'educational', icon: 'bx-book', description: 'Teaching, training' },
-    { id: 'environmental', label: 'Environmental', value: 'environmental', icon: 'bx-leaf', description: 'Sustainability' },
-    { id: 'sales', label: 'Sales', value: 'sales', icon: 'bx-line-chart', description: 'Business development' },
-    { id: 'support', label: 'Support', value: 'support', icon: 'bx-support', description: 'HR, office management' }
+    { id: 'creative', label: 'Creative', value: 'creative', icon: 'bx-palette', description: 'Design, writing, arts', category: 'creative' },
+    { id: 'analytical', label: 'Analytical', value: 'analytical', icon: 'bx-stats', description: 'Data analysis, research', category: 'analytical' },
+    { id: 'technical', label: 'Technical', value: 'technical', icon: 'bx-code-alt', description: 'Engineering, programming', category: 'technical' },
+    { id: 'handsOn', label: 'Hands-on', value: 'handsOn', icon: 'bx-wrench', description: 'Construction, manufacturing', category: 'practical' },
+    { id: 'social', label: 'Social', value: 'social', icon: 'bx-group', description: 'Teaching, counseling, service', category: 'social' },
+    { id: 'structured', label: 'Structured', value: 'structured', icon: 'bx-list-check', description: 'Accounting, administration', category: 'organizational' },
+    { id: 'leadership', label: 'Leadership', value: 'leadership', icon: 'bx-trending-up', description: 'Team leading, management', category: 'management' },
+    { id: 'entrepreneurial', label: 'Entrepreneurial', value: 'entrepreneurial', icon: 'bx-bulb', description: 'Startups, business', category: 'business' },
+    { id: 'scientific', label: 'Scientific', value: 'scientific', icon: 'bx-test-tube', description: 'Biology, chemistry', category: 'scientific' },
+    { id: 'healthcare', label: 'Healthcare', value: 'healthcare', icon: 'bx-plus-medical', description: 'Nursing, medicine', category: 'healthcare' },
+    { id: 'outdoor', label: 'Outdoor', value: 'outdoor', icon: 'bx-street-view', description: 'Agriculture, forestry', category: 'environmental' },
+    { id: 'digital', label: 'Digital', value: 'digital', icon: 'bx-globe', description: 'Online work, remote', category: 'technical' },
+    { id: 'logistical', label: 'Logistical', value: 'logistical', icon: 'bx-package', description: 'Supply chain, operations', category: 'organizational' },
+    { id: 'artistic', label: 'Artistic', value: 'artistic', icon: 'bx-music', description: 'Performing, visual arts', category: 'creative' },
+    { id: 'financial', label: 'Financial', value: 'financial', icon: 'bx-dollar', description: 'Banking, investment', category: 'business' },
+    { id: 'legal', label: 'Legal', value: 'legal', icon: 'bx-registered', description: 'Law, compliance', category: 'professional' },
+    { id: 'educational', label: 'Educational', value: 'educational', icon: 'bx-book', description: 'Teaching, training', category: 'social' },
+    { id: 'environmental', label: 'Environmental', value: 'environmental', icon: 'bx-leaf', description: 'Sustainability', category: 'environmental' },
+    { id: 'sales', label: 'Sales', value: 'sales', icon: 'bx-line-chart', description: 'Business development', category: 'business' },
+    { id: 'support', label: 'Support', value: 'support', icon: 'bx-support', description: 'HR, office management', category: 'organizational' }
   ];
 
   const salaryOptions = [
@@ -101,113 +108,247 @@
     { id: 'enterprise', label: 'Enterprise', value: 'enterprise', icon: 'bx-world', description: '1000+ employees' }
   ];
 
-  function handleWorkTypeChange(event: Event) {
-    const target = event.target as HTMLInputElement;
-    const { value, checked: isChecked } = target;
-    
-    if (isChecked && data.workTypes.length < WORK_TYPE_LIMIT) {
-      data.workTypes = [...data.workTypes, value];
-    } else if (!isChecked) {
-      data.workTypes = data.workTypes.filter(type => type !== value);
-    } else if (isChecked && data.workTypes.length >= WORK_TYPE_LIMIT) {
-      target.checked = false;
-      showAlert(`You can select up to ${WORK_TYPE_LIMIT} work types only.`);
-    }
-  }
+  // Work type categories for filtering
+  const workTypeCategories = [
+    { id: 'all', name: 'All Types', icon: 'bx-grid-alt', color: '#4f46e5' },
+    { id: 'creative', name: 'Creative', icon: 'bx-palette', color: '#ec4899' },
+    { id: 'technical', name: 'Technical', icon: 'bx-code-alt', color: '#4f46e5' },
+    { id: 'business', name: 'Business', icon: 'bx-building', color: '#7c3aed' },
+    { id: 'social', name: 'Social', icon: 'bx-group', color: '#059669' },
+    { id: 'scientific', name: 'Scientific', icon: 'bx-test-tube', color: '#dc2626' },
+    { id: 'organizational', name: 'Organizational', icon: 'bx-list-check', color: '#d97706' }
+  ];
 
-  function handleEducationLevelChange(value: string) {
+  // Pre-computed lookups for better performance
+  const workTypeLookup = new Map(workTypeOptions.map(opt => [opt.value, opt]));
+  const salaryLookup = new Map(salaryOptions.map(opt => [opt.value, opt]));
+  const motivationLookup = new Map(motivationOptions.map(opt => [opt.value, opt]));
+  const educationLookup = new Map(educationOptions.map(opt => [opt.value, opt]));
+  const educationFieldLookup = new Map(educationFieldOptions.map(opt => [opt.value, opt]));
+  const companySizeLookup = new Map(companySizeOptions.map(opt => [opt.value, opt]));
+
+  // Optimized reactive declarations
+  $: selectedWorkTypesCount = data.workTypes.length;
+  $: selectedEducationFieldCount = data.educationField ? 1 : 0;
+  
+  $: isFormComplete = data.workTypes.length > 0 && 
+                      data.salaryExpectation && 
+                      data.workMotivation && 
+                      data.educationLevel && 
+                      data.preferredCompanySize &&
+                      (!showEducationField || data.educationField);
+
+  $: hasSelections = data.workTypes.length > 0 || 
+                     data.salaryExpectation || 
+                     data.workMotivation || 
+                     data.educationLevel || 
+                     data.educationField || 
+                     data.preferredCompanySize;
+
+  // Optimized disabled state checks
+  $: isWorkTypeDisabled = (value: string) => 
+    data.workTypes.length >= WORK_TYPE_LIMIT && !data.workTypes.includes(value);
+
+  // Optimized filtering with early returns
+  $: filteredWorkTypes = (() => {
+    const query = searchQuery.trim().toLowerCase();
+    const isAllCategory = selectedCategory === 'all';
+    
+    // Fast path: no filters applied
+    if (!query && isAllCategory) {
+      return workTypeOptions;
+    }
+
+    return workTypeOptions.filter(option => {
+      const matchesSearch = !query || 
+        option.label.toLowerCase().includes(query) || 
+        option.value.toLowerCase().includes(query) ||
+        option.description.toLowerCase().includes(query);
+      
+      const matchesCategory = isAllCategory || option.category === selectedCategory;
+      
+      return matchesSearch && matchesCategory;
+    });
+  })();
+
+  // Lifecycle
+  onMount(() => {
+    console.log('Preferences component mounted');
+  });
+
+  // Optimized event handlers
+  const handleMultiSelect = (field: string[], value: string, max: number, type: string) => {
+    const index = field.indexOf(value);
+    
+    if (index === -1) {
+      if (field.length < max) {
+        showToast(`${type} added`, 'success');
+        return [...field, value];
+      }
+      showToast(`Maximum ${max} ${type}s allowed`, 'warning');
+      return field;
+    }
+    
+    showToast(`${type} removed`, 'info');
+    return field.filter(item => item !== value);
+  };
+
+  const handleWorkTypeChange = (value: string) => {
+    data.workTypes = handleMultiSelect(data.workTypes, value, WORK_TYPE_LIMIT, 'work type');
+  };
+
+  const handleEducationLevelChange = (value: string) => {
     data.educationLevel = value;
     showEducationField = ['bachelor', 'master', 'doctorate'].includes(value);
     if (!showEducationField) {
       data.educationField = '';
     }
-  }
+    showToast('Education level updated', 'success');
+  };
 
-  function showAlert(message: string) {
-    alert(message);
-  }
+  const handleSalaryChange = (value: string) => {
+    data.salaryExpectation = value;
+    showToast('Salary preference updated', 'success');
+  };
 
-  function goBack() {
-    dispatch('backToHome');
-  }
+  const handleMotivationChange = (value: string) => {
+    data.workMotivation = value;
+    showToast('Work motivation updated', 'success');
+  };
 
-  function validateForm(): boolean {
+  const handleCompanySizeChange = (value: string) => {
+    data.preferredCompanySize = value;
+    showToast('Company size preference updated', 'success');
+  };
+
+  const handleEducationFieldChange = (value: string) => {
+    data.educationField = value;
+    showToast('Education field updated', 'success');
+  };
+
+  const handleSearch = (event: Event) => {
+    searchQuery = (event.target as HTMLInputElement).value;
+  };
+
+  const handleCategoryFilter = (categoryId: string) => {
+    selectedCategory = categoryId;
+  };
+
+  const clearSearch = () => {
+    searchQuery = '';
+    selectedCategory = 'all';
+  };
+
+  const clearAllSelections = () => {
+    data.workTypes = [];
+    data.salaryExpectation = '';
+    data.workMotivation = '';
+    data.educationLevel = '';
+    data.educationField = '';
+    data.preferredCompanySize = '';
+    showEducationField = false;
+    showToast('All selections cleared', 'info');
+  };
+
+  // Optimized toast system
+  const showToast = (message: string, type: ToastType = 'info') => {
+    activeToast = { message, type };
+    
+    // Auto-dismiss after 3 seconds
+    setTimeout(() => {
+      if (activeToast?.message === message) {
+        activeToast = null;
+      }
+    }, 3000);
+  };
+
+  // Optimized navigation with validation
+  const nextQuestion = async () => {
+    // Early validation
     if (data.workTypes.length === 0) {
-      showAlert('Please select at least one work type');
-      return false;
+      showToast('Please select at least one work type', 'warning');
+      return;
     }
     
-    const requiredFields = [
-      { field: data.salaryExpectation, name: 'salary expectation' },
-      { field: data.workMotivation, name: 'work motivation' },
-      { field: data.educationLevel, name: 'education level' },
-      { field: data.preferredCompanySize, name: 'preferred company size' }
-    ];
+    if (!data.salaryExpectation) {
+      showToast('Please select your salary expectation', 'warning');
+      return;
+    }
+    
+    if (!data.workMotivation) {
+      showToast('Please select your work motivation', 'warning');
+      return;
+    }
+    
+    if (!data.educationLevel) {
+      showToast('Please select your education level', 'warning');
+      return;
+    }
     
     if (showEducationField && !data.educationField) {
-      showAlert('Please select your field of study');
-      return false;
+      showToast('Please select your field of study', 'warning');
+      return;
     }
     
-    for (const { field, name } of requiredFields) {
-      if (!field) {
-        showAlert(`Please select your ${name}`);
-        return false;
-      }
+    if (!data.preferredCompanySize) {
+      showToast('Please select your preferred company size', 'warning');
+      return;
     }
     
-    return true;
-  }
-
-  function nextQuestion() {
-    if (!validateForm()) return;
+    isLoading = true;
     
-    formPartCompleted = true;
-    
-    dispatch('complete', {
-      workTypes: data.workTypes,
-      salaryExpectation: data.salaryExpectation,
-      workMotivation: data.workMotivation,
-      educationLevel: data.educationLevel,
-      educationField: data.educationField,
-      workExperience: data.workExperience,
-      preferredCompanySize: data.preferredCompanySize
-    });
-  }
+    try {
+      // Simulate API call
+      await new Promise(resolve => setTimeout(resolve, 500));
+      
+      dispatch('complete', {
+        workTypes: data.workTypes,
+        salaryExpectation: data.salaryExpectation,
+        workMotivation: data.workMotivation,
+        educationLevel: data.educationLevel,
+        educationField: data.educationField,
+        workExperience: data.workExperience,
+        preferredCompanySize: data.preferredCompanySize,
+        timestamp: new Date().toISOString()
+      });
+    } catch (error) {
+      showToast('Failed to save preferences', 'warning');
+      console.error('Error saving preferences:', error);
+    } finally {
+      isLoading = false;
+    }
+  };
 
-  $: isWorkTypeDisabled = (value: string) => 
-    data.workTypes.length >= WORK_TYPE_LIMIT && !data.workTypes.includes(value);
+  const goBack = () => {
+    dispatch('backToHome');
+  };
 
-  function getWorkTypeLabel(value: string) {
-    return workTypeOptions.find(option => option.value === value)?.label || value;
-  }
-
-  function getWorkTypeIcon(value: string) {
-    return workTypeOptions.find(option => option.value === value)?.icon || '';
-  }
-
-  function getMotivationLabel(value: string) {
-    return motivationOptions.find(option => option.value === value)?.label || value;
-  }
-
-  function getMotivationIcon(value: string) {
-    return motivationOptions.find(option => option.value === value)?.icon || '';
-  }
-
-  function getEducationLabel(value: string) {
-    return educationOptions.find(option => option.value === value)?.label || value;
-  }
-
-  function getCompanySizeLabel(value: string) {
-    return companySizeOptions.find(option => option.value === value)?.label || value;
-  }
-
-  function getCompanySizeIcon(value: string) {
-    return companySizeOptions.find(option => option.value === value)?.icon || '';
-  }
+  // Optimized helper functions using pre-computed lookups
+  const getWorkTypeLabel = (value: string) => workTypeLookup.get(value)?.label || value;
+  const getWorkTypeIcon = (value: string) => workTypeLookup.get(value)?.icon || '';
+  const getSalaryIcon = (value: string) => salaryLookup.get(value)?.icon || '';
+  const getSalaryLabel = (value: string) => salaryLookup.get(value)?.label || value;
+  const getMotivationLabel = (value: string) => motivationLookup.get(value)?.label || value;
+  const getMotivationIcon = (value: string) => motivationLookup.get(value)?.icon || '';
+  const getEducationLabel = (value: string) => educationLookup.get(value)?.label || value;
+  const getEducationIcon = (value: string) => educationLookup.get(value)?.icon || '';
+  const getEducationFieldIcon = (value: string) => educationFieldLookup.get(value)?.icon || '';
+  const getCompanySizeLabel = (value: string) => companySizeLookup.get(value)?.label || value;
+  const getCompanySizeIcon = (value: string) => companySizeLookup.get(value)?.icon || '';
 </script>
 
 <div class="preferences-page">
+  <!-- Toast Notification -->
+  {#if activeToast}
+    <div class="toast toast--{activeToast.type}" transition:fade>
+      <i class='bx {activeToast.type === "success" ? "bx-check-circle" : activeToast.type === "warning" ? "bx-error" : "bx-info-circle"}'></i>
+      <span>{activeToast.message}</span>
+      <button class="toast-close" on:click={() => activeToast = null} aria-label="Dismiss notification">
+        <i class='bx bx-x'></i>
+      </button>
+    </div>
+  {/if}
+
   <div class="preferences-header">
     <div class="header-content">
       <h1>Work Preferences</h1>
@@ -217,6 +358,7 @@
 
   <div class="center-container">
     <section class="preferences-content">
+      <!-- Progress Section -->
       <div class="progress-container">
         <div class="progress-bar">
           <div class="progress-fill" style="width: {progressWidth}"></div>
@@ -227,20 +369,30 @@
       <h2>Your Ideal Work Setup</h2>
 
       <!-- Selected Preview -->
-      {#if data.workTypes.length > 0 || data.salaryExpectation || data.workMotivation || data.educationLevel || data.preferredCompanySize}
-        <div class="selection-preview">
+      {#if hasSelections}
+        <div class="selection-preview" transition:fade>
           <div class="preview-header">
             <i class='bx bx-check-circle'></i>
             <h3>Your Selections</h3>
+            <button class="clear-all" on:click={clearAllSelections} aria-label="Clear all selections">
+              <i class='bx bx-trash'></i> Clear All
+            </button>
           </div>
           <div class="preview-items">
             {#if data.workTypes.length > 0}
               <div class="preview-category">
-                <h4>Work Types</h4>
+                <h4>Work Types ({data.workTypes.length}/{WORK_TYPE_LIMIT})</h4>
                 <div class="preview-tags">
                   {#each data.workTypes as type}
-                    <span class="preview-tag">
+                    <span class="preview-tag" transition:scale>
                       <i class='bx {getWorkTypeIcon(type)}'></i> {getWorkTypeLabel(type)}
+                      <button 
+                        class="remove-tag" 
+                        on:click={() => handleWorkTypeChange(type)}
+                        aria-label="Remove {getWorkTypeLabel(type)}"
+                      >
+                        <i class='bx bx-x'></i>
+                      </button>
                     </span>
                   {/each}
                 </div>
@@ -252,8 +404,15 @@
                 <h4>Salary</h4>
                 <div class="preview-tags">
                   <span class="preview-tag">
-                    <i class='bx {salaryOptions.find(o => o.value === data.salaryExpectation)?.icon}'></i> 
-                    {salaryOptions.find(o => o.value === data.salaryExpectation)?.label}
+                    <i class='bx {getSalaryIcon(data.salaryExpectation)}'></i> 
+                    {getSalaryLabel(data.salaryExpectation)}
+                    <button 
+                      class="remove-tag" 
+                      on:click={() => data.salaryExpectation = ''}
+                      aria-label="Remove salary preference"
+                    >
+                      <i class='bx bx-x'></i>
+                    </button>
                   </span>
                 </div>
               </div>
@@ -265,6 +424,13 @@
                 <div class="preview-tags">
                   <span class="preview-tag">
                     <i class='bx {getMotivationIcon(data.workMotivation)}'></i> {getMotivationLabel(data.workMotivation)}
+                    <button 
+                      class="remove-tag" 
+                      on:click={() => data.workMotivation = ''}
+                      aria-label="Remove work motivation"
+                    >
+                      <i class='bx bx-x'></i>
+                    </button>
                   </span>
                 </div>
               </div>
@@ -275,8 +441,34 @@
                 <h4>Education</h4>
                 <div class="preview-tags">
                   <span class="preview-tag">
-                    <i class='bx {educationOptions.find(o => o.value === data.educationLevel)?.icon}'></i> 
+                    <i class='bx {getEducationIcon(data.educationLevel)}'></i> 
                     {getEducationLabel(data.educationLevel)}
+                    <button 
+                      class="remove-tag" 
+                      on:click={() => { data.educationLevel = ''; data.educationField = ''; showEducationField = false; }}
+                      aria-label="Remove education level"
+                    >
+                      <i class='bx bx-x'></i>
+                    </button>
+                  </span>
+                </div>
+              </div>
+            {/if}
+
+            {#if data.educationField}
+              <div class="preview-category">
+                <h4>Field of Study</h4>
+                <div class="preview-tags">
+                  <span class="preview-tag">
+                    <i class='bx {getEducationFieldIcon(data.educationField)}'></i> 
+                    {data.educationField}
+                    <button 
+                      class="remove-tag" 
+                      on:click={() => data.educationField = ''}
+                      aria-label="Remove education field"
+                    >
+                      <i class='bx bx-x'></i>
+                    </button>
                   </span>
                 </div>
               </div>
@@ -288,6 +480,13 @@
                 <div class="preview-tags">
                   <span class="preview-tag">
                     <i class='bx {getCompanySizeIcon(data.preferredCompanySize)}'></i> {getCompanySizeLabel(data.preferredCompanySize)}
+                    <button 
+                      class="remove-tag" 
+                      on:click={() => data.preferredCompanySize = ''}
+                      aria-label="Remove company size preference"
+                    >
+                      <i class='bx bx-x'></i>
+                    </button>
                   </span>
                 </div>
               </div>
@@ -309,15 +508,66 @@
           </div>
         </div>
         <p class="question-description">These categories help us understand your professional orientation</p>
+        
+        <!-- Search and Filter Controls -->
+        <div class="skills-controls">
+          <div class="search-box">
+            <i class='bx bx-search'></i>
+            <input 
+              type="text" 
+              placeholder="Search work types..." 
+              class="skill-search" 
+              bind:value={searchQuery}
+              aria-label="Search work types"
+            />
+            {#if searchQuery}
+              <button class="clear-search" on:click={clearSearch} aria-label="Clear search">
+                <i class='bx bx-x'></i>
+              </button>
+            {/if}
+          </div>
+          
+          <div class="category-filters">
+            {#each workTypeCategories as category (category.id)}
+              <button 
+                class="category-filter {selectedCategory === category.id ? 'active' : ''}"
+                on:click={() => handleCategoryFilter(category.id)}
+                style="--category-color: {category.color}"
+                title="{category.name}"
+                aria-label="Show {category.name} category"
+              >
+                <i class='bx {category.icon}'></i>
+                {category.name}
+              </button>
+            {/each}
+          </div>
+        </div>
+        
+        <!-- Search Results -->
+        {#if searchQuery && filteredWorkTypes.length === 0}
+          <div class="no-results">
+            <i class='bx bx-search-alt'></i>
+            <p>No work types found for "{searchQuery}"</p>
+            <small>Try a different search term or browse all categories</small>
+            <button class="clear-search-btn" on:click={clearSearch}>
+              Clear Search
+            </button>
+          </div>
+        {/if}
+        
         <div class="options-grid work-type-options">
-          {#each workTypeOptions as option}
-            <label class="option-card {isWorkTypeDisabled(option.value) ? 'disabled' : ''} {data.workTypes.includes(option.value) ? 'selected' : ''}">
+          {#each filteredWorkTypes as option (option.id)}
+            <label 
+              class="option-card {isWorkTypeDisabled(option.value) ? 'disabled' : ''} {data.workTypes.includes(option.value) ? 'selected' : ''}"
+              title="{option.description}"
+            >
               <input
                 type="checkbox"
                 value={option.value}
                 checked={data.workTypes.includes(option.value)}
-                on:change={handleWorkTypeChange}
+                on:change={() => handleWorkTypeChange(option.value)}
                 disabled={isWorkTypeDisabled(option.value)}
+                aria-label="{option.label} - {option.description}"
               />
               <div class="option-content">
                 <div class="option-icon">
@@ -334,9 +584,14 @@
             </label>
           {/each}
         </div>
-        {#if data.workTypes.length > 0}
+        
+        {#if selectedWorkTypesCount > 0}
           <div class="selection-count">
-            <i class='bx bx-check-square'></i> Selected: {data.workTypes.length}/{WORK_TYPE_LIMIT}
+            <i class='bx bx-check-square'></i> 
+            Selected: {selectedWorkTypesCount}/{WORK_TYPE_LIMIT}
+            {#if selectedWorkTypesCount === WORK_TYPE_LIMIT}
+              <span class="limit-reached">Maximum reached</span>
+            {/if}
           </div>
         {/if}
       </div>
@@ -351,13 +606,15 @@
         </div>
         <p class="question-description">Your preference helps match you with suitable opportunities</p>
         <div class="options-row salary-options">
-          {#each salaryOptions as option}
+          {#each salaryOptions as option (option.id)}
             <label class="option-pill {data.salaryExpectation === option.value ? 'selected' : ''}">
               <input
                 type="radio"
                 name="salary"
                 value={option.value}
-                bind:group={data.salaryExpectation}
+                checked={data.salaryExpectation === option.value}
+                on:change={() => handleSalaryChange(option.value)}
+                aria-label="{option.label} - {option.description}"
               />
               <div class="option-content">
                 <i class='bx {option.icon}'></i>
@@ -382,13 +639,15 @@
           </div>
         </div>
         <div class="options-grid motivation-options">
-          {#each motivationOptions as option}
+          {#each motivationOptions as option (option.id)}
             <label class="option-card {data.workMotivation === option.value ? 'selected' : ''}">
               <input 
                 type="radio" 
                 name="motivation" 
                 value={option.value}
-                bind:group={data.workMotivation}
+                checked={data.workMotivation === option.value}
+                on:change={() => handleMotivationChange(option.value)}
+                aria-label="{option.label} - {option.description}"
               />
               <div class="option-content">
                 <div class="option-icon">
@@ -417,7 +676,7 @@
         </div>
         <p class="question-description">This helps us understand your educational background</p>
         <div class="options-grid education-options">
-          {#each educationOptions as option}
+          {#each educationOptions as option (option.id)}
             <label class="option-card {data.educationLevel === option.value ? 'selected' : ''}">
               <input 
                 type="radio" 
@@ -425,6 +684,7 @@
                 value={option.value}
                 checked={data.educationLevel === option.value}
                 on:change={() => handleEducationLevelChange(option.value)}
+                aria-label="{option.label} - {option.description}"
               />
               <div class="option-content">
                 <div class="option-icon">
@@ -455,13 +715,15 @@
             </div>
           </div>
           <div class="options-grid education-field-options">
-            {#each educationFieldOptions as option}
+            {#each educationFieldOptions as option (option.id)}
               <label class="option-pill {data.educationField === option.value ? 'selected' : ''}">
                 <input 
                   type="radio" 
                   name="educationField" 
                   value={option.value}
-                  bind:group={data.educationField}
+                  checked={data.educationField === option.value}
+                  on:change={() => handleEducationFieldChange(option.value)}
+                  aria-label="{option.label}"
                 />
                 <div class="option-content">
                   <i class='bx {option.icon}'></i>
@@ -486,13 +748,15 @@
           </div>
         </div>
         <div class="options-row company-size-options">
-          {#each companySizeOptions as option}
+          {#each companySizeOptions as option (option.id)}
             <label class="option-card {data.preferredCompanySize === option.value ? 'selected' : ''}">
               <input 
                 type="radio" 
                 name="companySize" 
                 value={option.value}
-                bind:group={data.preferredCompanySize}
+                checked={data.preferredCompanySize === option.value}
+                on:change={() => handleCompanySizeChange(option.value)}
+                aria-label="{option.label} - {option.description}"
               />
               <div class="option-content">
                 <div class="option-icon">
@@ -516,8 +780,29 @@
         <button class="nav-button secondary" type="button" on:click={goBack}>
           <i class='bx bx-chevron-left'></i> Back
         </button>
-        <button class="nav-button primary" type="button" on:click={nextQuestion}>
-          Next <i class='bx bx-chevron-right'></i>
+        
+        <div class="completion-status">
+          {#if isFormComplete}
+            <i class='bx bx-check-circle'></i>
+            <span>All sections completed</span>
+          {:else}
+            <i class='bx bx-error-circle'></i>
+            <span>Complete all sections to continue</span>
+          {/if}
+        </div>
+        
+        <button 
+          class="nav-button primary" 
+          type="button" 
+          on:click={nextQuestion}
+          disabled={!isFormComplete || isLoading}
+        >
+          {#if isLoading}
+            <i class='bx bx-loader-alt bx-spin'></i>
+            Processing...
+          {:else}
+            Next <i class='bx bx-chevron-right'></i>
+          {/if}
         </button>
       </div>
     </section>
@@ -534,6 +819,62 @@
     background: linear-gradient(135deg, #f8fafc 0%, #f1f5f9 100%);
     font-family: 'Inter', sans-serif;
     color: #1e293b;
+    position: relative;
+  }
+
+  /* Toast Styles */
+  .toast {
+    position: fixed;
+    top: 2rem;
+    right: 2rem;
+    background: white;
+    padding: 1rem 1.5rem;
+    border-radius: 0.75rem;
+    box-shadow: 0 10px 25px rgba(0, 0, 0, 0.15);
+    display: flex;
+    align-items: center;
+    gap: 0.75rem;
+    z-index: 1000;
+    max-width: 400px;
+    border-left: 4px solid;
+    animation: slideInRight 0.3s ease;
+  }
+
+  .toast--success {
+    border-left-color: #10b981;
+  }
+
+  .toast--warning {
+    border-left-color: #f59e0b;
+  }
+
+  .toast--info {
+    border-left-color: #4f46e5;
+  }
+
+  .toast-close {
+    background: none;
+    border: none;
+    color: #64748b;
+    cursor: pointer;
+    padding: 0.25rem;
+    border-radius: 0.25rem;
+    margin-left: auto;
+  }
+
+  .toast-close:hover {
+    background: #f1f5f9;
+  }
+
+  @keyframes slideInRight {
+    from {
+      transform: translateX(100%);
+      opacity: 0;
+    }
+    to {
+      transform: translateX(0);
+      opacity: 1;
+    }
   }
 
   .preferences-header {
@@ -643,6 +984,7 @@
   .preview-header {
     display: flex;
     align-items: center;
+    justify-content: space-between;
     margin-bottom: 1rem;
   }
 
@@ -657,6 +999,25 @@
     margin: 0;
     color: #334155;
     font-weight: 600;
+  }
+
+  .clear-all {
+    background: none;
+    border: none;
+    color: #64748b;
+    cursor: pointer;
+    padding: 0.5rem;
+    border-radius: 0.375rem;
+    font-size: 0.875rem;
+    display: flex;
+    align-items: center;
+    gap: 0.25rem;
+    transition: all 0.2s;
+  }
+
+  .clear-all:hover {
+    background-color: #e2e8f0;
+    color: #dc2626;
   }
 
   .preview-items {
@@ -687,7 +1048,7 @@
 
   .preview-tag {
     background-color: white;
-    padding: 0.5rem 0.875rem;
+    padding: 0.5rem 0.75rem;
     border-radius: 1.5rem;
     font-size: 0.8rem;
     box-shadow: 0 1px 3px rgba(0,0,0,0.08);
@@ -696,11 +1057,30 @@
     gap: 0.4rem;
     border: 1px solid #e2e8f0;
     font-weight: 500;
+    position: relative;
   }
 
   .preview-tag i {
     font-size: 1rem;
-    color: #4f46e5;
+  }
+
+  .remove-tag {
+    background: none;
+    border: none;
+    color: #94a3b8;
+    cursor: pointer;
+    padding: 0.125rem;
+    border-radius: 50%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    transition: all 0.2s;
+    margin-left: 0.25rem;
+  }
+
+  .remove-tag:hover {
+    background-color: #f1f5f9;
+    color: #64748b;
   }
 
   /* Question Cards */
@@ -796,6 +1176,93 @@
   .tooltip:hover .tooltiptext {
     visibility: visible;
     opacity: 1;
+  }
+
+  /* Skills Controls */
+  .skills-controls {
+    display: flex;
+    flex-direction: column;
+    gap: 1rem;
+    margin-bottom: 1.5rem;
+  }
+
+  .search-box {
+    position: relative;
+    max-width: 400px;
+  }
+
+  .search-box i {
+    position: absolute;
+    left: 1rem;
+    top: 50%;
+    transform: translateY(-50%);
+    color: #94a3b8;
+  }
+
+  .skill-search {
+    width: 100%;
+    padding: 0.75rem 1rem 0.75rem 2.75rem;
+    border: 1px solid #e2e8f0;
+    border-radius: 0.5rem;
+    font-size: 0.95rem;
+    transition: all 0.2s;
+  }
+
+  .skill-search:focus {
+    outline: none;
+    border-color: #4f46e5;
+    box-shadow: 0 0 0 2px #c7d2fe;
+  }
+
+  .clear-search {
+    position: absolute;
+    right: 0.75rem;
+    top: 50%;
+    transform: translateY(-50%);
+    background: none;
+    border: none;
+    color: #94a3b8;
+    cursor: pointer;
+    padding: 0.25rem;
+    border-radius: 50%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+  }
+
+  .clear-search:hover {
+    background-color: #f1f5f9;
+    color: #64748b;
+  }
+
+  .category-filters {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.5rem;
+  }
+
+  .category-filter {
+    background: white;
+    border: 1px solid #e2e8f0;
+    padding: 0.5rem 1rem;
+    border-radius: 2rem;
+    font-size: 0.875rem;
+    cursor: pointer;
+    transition: all 0.2s;
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+  }
+
+  .category-filter:hover {
+    border-color: var(--category-color, #4f46e5);
+    color: var(--category-color, #4f46e5);
+  }
+
+  .category-filter.active {
+    background-color: var(--category-color, #4f46e5);
+    color: white;
+    border-color: var(--category-color, #4f46e5);
   }
 
   /* Options Grid */
@@ -958,6 +1425,50 @@
     font-size: 0.75rem;
   }
 
+  /* No results message */
+  .no-results {
+    text-align: center;
+    padding: 2rem;
+    color: #64748b;
+    background-color: #f8fafc;
+    border-radius: 0.75rem;
+    margin-bottom: 1.5rem;
+  }
+
+  .no-results i {
+    font-size: 3rem;
+    color: #cbd5e1;
+    margin-bottom: 1rem;
+    display: block;
+  }
+
+  .no-results p {
+    font-size: 1.1rem;
+    margin-bottom: 0.5rem;
+    font-weight: 500;
+  }
+
+  .no-results small {
+    font-size: 0.9rem;
+    display: block;
+    margin-bottom: 1rem;
+  }
+
+  .clear-search-btn {
+    background: #4f46e5;
+    color: white;
+    border: none;
+    padding: 0.5rem 1rem;
+    border-radius: 0.375rem;
+    cursor: pointer;
+    font-size: 0.875rem;
+    transition: background-color 0.2s;
+  }
+
+  .clear-search-btn:hover {
+    background: #4338ca;
+  }
+
   .selection-count {
     margin-top: 1rem;
     font-size: 0.875rem;
@@ -973,10 +1484,17 @@
     color: #10b981;
   }
 
+  .limit-reached {
+    color: #dc2626;
+    font-weight: 500;
+    margin-left: 0.5rem;
+  }
+
   /* Navigation */
   .navigation-buttons {
     display: flex;
     justify-content: space-between;
+    align-items: center;
     margin-top: 3rem;
     gap: 1rem;
   }
@@ -1034,10 +1552,47 @@
     color: #64748b;
   }
 
+  .completion-status {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    font-size: 0.875rem;
+    color: #64748b;
+  }
+
+  .completion-status i {
+    font-size: 1.25rem;
+  }
+
+  .completion-status i.bx-check-circle {
+    color: #10b981;
+  }
+
+  .completion-status i.bx-error-circle {
+    color: #f59e0b;
+  }
+
+  /* Loading animation */
+  .bx-loader-alt.bx-spin {
+    animation: spin 1s linear infinite;
+  }
+
+  @keyframes spin {
+    from { transform: rotate(0deg); }
+    to { transform: rotate(360deg); }
+  }
+
   /* Responsive Design */
   @media (max-width: 768px) {
     .preferences-page {
       padding: 0;
+    }
+
+    .toast {
+      top: 1rem;
+      right: 1rem;
+      left: 1rem;
+      max-width: none;
     }
 
     .preferences-header {
@@ -1065,10 +1620,30 @@
 
     .navigation-buttons {
       flex-direction: column;
+      align-items: stretch;
     }
 
     .nav-button {
       width: 100%;
+    }
+
+    .completion-status {
+      order: -1;
+      justify-content: center;
+      margin-bottom: 1rem;
+    }
+
+    .skills-controls {
+      flex-direction: column;
+    }
+
+    .category-filters {
+      justify-content: center;
+    }
+
+    .category-filter {
+      font-size: 0.8rem;
+      padding: 0.375rem 0.75rem;
     }
   }
 
