@@ -1,219 +1,358 @@
-<!-- Skills -->
+<!-- Skills.svelte -->
 <script lang="ts">
-  import { createEventDispatcher } from 'svelte';
+  import { createEventDispatcher, onMount } from 'svelte';
+  import { fade, scale } from 'svelte/transition';
+  
   const dispatch = createEventDispatcher();
 
-  export let data: {
+  // Types for better type safety
+  type SkillData = {
     strengths: string[];
     experienceLevel: string;
     technicalSkills: string[];
-  } = {
+  };
+
+  type ToastType = 'success' | 'warning' | 'info';
+
+  export let data: SkillData = {
     strengths: [],
     experienceLevel: '',
     technicalSkills: []
   };
 
-  export let progressWidth = '75%';
+  export let progressWidth = '50%';
+
+  // Reactive state
+  let searchQuery = '';
+  let isLoading = false;
+  let selectedCategory = 'all';
+  let activeToast: { message: string; type: ToastType } | null = null;
+
+  // Constants - optimized with memoization potential
+  const STRENGTH_LIMIT = 3;
+  const SKILLS_LIMIT = 6;
 
   const strengthOptions = [
-    { id: 'leadership', label: 'Leadership', value: 'leadership', icon: 'bx-crown' },
-    { id: 'teamwork', label: 'Teamwork', value: 'teamwork', icon: 'bx-group' },
-    { id: 'creativity', label: 'Creativity', value: 'creativity', icon: 'bx-palette' },
-    { id: 'problem-solving', label: 'Problem Solving', value: 'problem-solving', icon: 'bx-cube' },
-    { id: 'adaptability', label: 'Adaptability', value: 'adaptability', icon: 'bx-reset' },
-    { id: 'communication', label: 'Communication', value: 'communication', icon: 'bx-chat' },
-    { id: 'time-management', label: 'Time Management', value: 'time-management', icon: 'bx-time' },
-    { id: 'critical-thinking', label: 'Critical Thinking', value: 'critical-thinking', icon: 'bx-brain' }
+    { id: 'leadership', label: 'Leadership', value: 'leadership', icon: 'bx-crown', description: 'Guiding and motivating teams' },
+    { id: 'teamwork', label: 'Teamwork', value: 'teamwork', icon: 'bx-group', description: 'Collaborating effectively with others' },
+    { id: 'creativity', label: 'Creativity', value: 'creativity', icon: 'bx-palette', description: 'Generating innovative ideas' },
+    { id: 'problem-solving', label: 'Problem Solving', value: 'problem-solving', icon: 'bx-cube', description: 'Analyzing and resolving challenges' },
+    { id: 'adaptability', label: 'Adaptability', value: 'adaptability', icon: 'bx-reset', description: 'Adjusting to changing circumstances' },
+    { id: 'communication', label: 'Communication', value: 'communication', icon: 'bx-chat', description: 'Expressing ideas clearly' },
+    { id: 'time-management', label: 'Time Management', value: 'time-management', icon: 'bx-time', description: 'Prioritizing tasks efficiently' },
+    { id: 'critical-thinking', label: 'Critical Thinking', value: 'critical-thinking', icon: 'bx-brain', description: 'Evaluating information logically' }
   ];
 
   const experienceOptions = [
-    { id: 'intern', label: 'Intern/Student', value: 'intern', description: 'Limited professional experience', icon: 'bx-user-pin' },
-    { id: 'junior', label: 'Junior (0-2 years)', value: 'junior', description: 'Early career professional', icon: 'bx-user' },
-    { id: 'mid', label: 'Mid-level (2-5 years)', value: 'mid', description: 'Experienced professional', icon: 'bx-user-voice' },
-    { id: 'senior', label: 'Senior (5+ years)', value: 'senior', description: 'Seasoned expert', icon: 'bx-user-check' },
-    { id: 'executive', label: 'Executive/Manager', value: 'executive', description: 'Leadership role', icon: 'bx-trending-up' }
+    { id: 'intern', label: 'Intern/Student', value: 'intern', description: 'Limited professional experience', icon: 'bx-user-pin', years: '0-1 years' },
+    { id: 'junior', label: 'Junior (0-2 years)', value: 'junior', description: 'Early career professional', icon: 'bx-user', years: '0-2 years' },
+    { id: 'mid', label: 'Mid-level (2-5 years)', value: 'mid', description: 'Experienced professional', icon: 'bx-user-voice', years: '2-5 years' },
+    { id: 'senior', label: 'Senior (5+ years)', value: 'senior', description: 'Seasoned expert', icon: 'bx-user-check', years: '5+ years' },
+    { id: 'executive', label: 'Executive/Manager', value: 'executive', description: 'Leadership role', icon: 'bx-trending-up', years: '8+ years' }
   ];
 
+  // Optimized skill data structure with lazy loading potential
   const technicalSkillCategories = [
     {
-      name: 'Technical',
+      id: 'healthcare',
+      name: 'Healthcare & Medicine',
+      icon: 'bx-plus-medical',
+      color: '#dc2626',
+      skills: [
+        { id: 'patient-care', label: 'Patient Care', value: 'patient-care', category: 'healthcare', popularity: 95 },
+        { id: 'medical-diagnosis', label: 'Medical Diagnosis', value: 'medical-diagnosis', category: 'healthcare', popularity: 90 },
+        { id: 'surgical-skills', label: 'Surgical Skills', value: 'surgical-skills', category: 'healthcare', popularity: 85 },
+        { id: 'pharmaceutical-knowledge', label: 'Pharmaceutical Knowledge', value: 'pharmaceutical-knowledge', category: 'healthcare', popularity: 80 },
+        { id: 'medical-research', label: 'Medical Research', value: 'medical-research', category: 'healthcare', popularity: 75 }
+      ]
+    },
+    {
+      id: 'technology',
+      name: 'Technology & IT',
       icon: 'bx-code-alt',
+      color: '#4f46e5',
       skills: [
-        { id: 'data-analysis', label: 'Data Analysis', value: 'data-analysis' },
-        { id: 'programming', label: 'Programming', value: 'programming' },
-        { id: 'ai-ml', label: 'AI/ML', value: 'ai-ml' },
-        { id: 'cloud-computing', label: 'Cloud Computing', value: 'cloud-computing' },
-        { id: 'cybersecurity', label: 'Cybersecurity', value: 'cybersecurity' },
-        { id: 'technical-writing', label: 'Technical Writing', value: 'technical-writing' }
+        { id: 'programming', label: 'Programming', value: 'programming', category: 'technology', popularity: 95 },
+        { id: 'web-development', label: 'Web Development', value: 'web-development', category: 'technology', popularity: 90 },
+        { id: 'mobile-development', label: 'Mobile Development', value: 'mobile-development', category: 'technology', popularity: 85 },
+        { id: 'cloud-computing', label: 'Cloud Computing', value: 'cloud-computing', category: 'technology', popularity: 88 },
+        { id: 'cybersecurity', label: 'Cybersecurity', value: 'cybersecurity', category: 'technology', popularity: 92 }
       ]
     },
     {
-      name: 'Business',
+      id: 'business',
+      name: 'Business & Management',
       icon: 'bx-building',
+      color: '#7c3aed',
       skills: [
-        { id: 'financial-skills', label: 'Financial Skills', value: 'financial-skills' },
-        { id: 'project-management', label: 'Project Management', value: 'project-management' },
-        { id: 'business-analysis', label: 'Business Analysis', value: 'business-analysis' },
-        { id: 'marketing', label: 'Marketing', value: 'marketing' }
+        { id: 'project-management', label: 'Project Management', value: 'project-management', category: 'business', popularity: 90 },
+        { id: 'financial-analysis', label: 'Financial Analysis', value: 'financial-analysis', category: 'business', popularity: 85 },
+        { id: 'marketing-strategy', label: 'Marketing Strategy', value: 'marketing-strategy', category: 'business', popularity: 88 },
+        { id: 'sales-skills', label: 'Sales Skills', value: 'sales-skills', category: 'business', popularity: 87 },
+        { id: 'business-development', label: 'Business Development', value: 'business-development', category: 'business', popularity: 84 }
       ]
     },
     {
-      name: 'Creative',
+      id: 'creative',
+      name: 'Creative & Design',
       icon: 'bx-palette',
+      color: '#ec4899',
       skills: [
-        { id: 'design-skills', label: 'Design Skills', value: 'design-skills' },
-        { id: 'video-editing', label: 'Video Editing', value: 'video-editing' },
-        { id: 'graphic-design', label: 'Graphic Design', value: 'graphic-design' }
-      ]
-    },
-    {
-      name: 'Industrial',
-      icon: 'bx-cog',
-      skills: [
-        { id: 'equipment-operation', label: 'Equipment Operation', value: 'equipment-operation' },
-        { id: 'quality-control', label: 'Quality Control', value: 'quality-control' },
-        { id: 'safety-procedures', label: 'Safety Procedures', value: 'safety-procedures' },
-        { id: 'technical-drawing', label: 'Technical Drawing', value: 'technical-drawing' },
-        { id: 'manufacturing-processes', label: 'Manufacturing Processes', value: 'manufacturing-processes' },
-        { id: 'laboratory-techniques', label: 'Laboratory Techniques', value: 'laboratory-techniques' }
+        { id: 'graphic-design', label: 'Graphic Design', value: 'graphic-design', category: 'creative', popularity: 85 },
+        { id: 'ui-ux-design', label: 'UI/UX Design', value: 'ui-ux-design', category: 'creative', popularity: 92 },
+        { id: 'video-editing', label: 'Video Editing', value: 'video-editing', category: 'creative', popularity: 83 },
+        { id: 'content-writing', label: 'Content Writing', value: 'content-writing', category: 'creative', popularity: 87 },
+        { id: 'digital-illustration', label: 'Digital Illustration', value: 'digital-illustration', category: 'creative', popularity: 80 }
       ]
     }
   ];
 
-  // Search functionality
-  let searchQuery = '';
-  let filteredCategories = [...technicalSkillCategories];
+  // Pre-computed lookups for better performance
+  const strengthLookup = new Map(strengthOptions.map(opt => [opt.value, opt]));
+  const experienceLookup = new Map(experienceOptions.map(opt => [opt.value, opt]));
+  const skillCategoryLookup = new Map();
   
-  // Function to filter skills based on search query
-  function filterSkills() {
-    if (!searchQuery.trim()) {
-      filteredCategories = [...technicalSkillCategories];
-      return;
-    }
-    
-    const query = searchQuery.toLowerCase().trim();
-    filteredCategories = technicalSkillCategories.map(category => {
-      const filteredSkills = category.skills.filter(skill => 
-        skill.label.toLowerCase().includes(query) || 
-        skill.value.toLowerCase().includes(query) ||
-        category.name.toLowerCase().includes(query)
-      );
-      
-      return {
-        ...category,
-        skills: filteredSkills
-      };
-    }).filter(category => category.skills.length > 0);
-  }
-  
-  // Handle search input
-  function handleSearch(event: Event) {
-    searchQuery = (event.target as HTMLInputElement).value;
-    filterSkills();
-  }
+  // Initialize skill category lookup
+  technicalSkillCategories.forEach(category => {
+    category.skills.forEach(skill => {
+      skillCategoryLookup.set(skill.value, category);
+    });
+  });
 
-  function handleMultiSelect(field: string[], value: string, max: number) {
+  // Optimized reactive declarations
+  $: selectedSkillsCount = data.technicalSkills.length;
+  $: selectedStrengthsCount = data.strengths.length;
+  
+  $: isFormComplete = data.strengths.length > 0 && 
+                      data.experienceLevel && 
+                      data.technicalSkills.length > 0;
+
+  $: hasSelections = data.strengths.length > 0 || 
+                     data.experienceLevel || 
+                     data.technicalSkills.length > 0;
+
+  // Optimized filtering with early returns and caching
+  $: filteredCategories = (() => {
+    const query = searchQuery.trim().toLowerCase();
+    const isAllCategory = selectedCategory === 'all';
+    
+    // Fast path: no filters applied
+    if (!query && isAllCategory) {
+      return technicalSkillCategories;
+    }
+
+    return technicalSkillCategories
+      .map(category => {
+        // Early category filtering
+        if (!isAllCategory && category.id !== selectedCategory) {
+          return { ...category, skills: [] };
+        }
+
+        const filteredSkills = category.skills.filter(skill => {
+          // Fast path for category-only filter
+          if (!query) return true;
+          
+          return skill.label.toLowerCase().includes(query) || 
+                 skill.value.toLowerCase().includes(query) ||
+                 category.name.toLowerCase().includes(query);
+        });
+        
+        return {
+          ...category,
+          skills: filteredSkills
+        };
+      })
+      .filter(category => category.skills.length > 0);
+  })();
+
+  // Optimized disabled state checks
+  $: isStrengthDisabled = (value: string) => 
+    data.strengths.length >= STRENGTH_LIMIT && !data.strengths.includes(value);
+
+  $: isTechnicalSkillDisabled = (value: string) => 
+    data.technicalSkills.length >= SKILLS_LIMIT && !data.technicalSkills.includes(value);
+
+  // Lifecycle
+  onMount(() => {
+    console.log('Skills component mounted');
+  });
+
+  // Optimized event handlers
+  const handleMultiSelect = (field: string[], value: string, max: number, type: string) => {
     const index = field.indexOf(value);
+    
     if (index === -1) {
-      if (field.length < max) return [...field, value];
-      alert(`Maximum ${max} selections allowed`);
+      if (field.length < max) {
+        showToast(`${type} added`, 'success');
+        return [...field, value];
+      }
+      showToast(`Maximum ${max} ${type}s allowed`, 'warning');
       return field;
     }
+    
+    showToast(`${type} removed`, 'info');
     return field.filter(item => item !== value);
-  }
+  };
 
-  function handleStrengthChange(value: string) {
-    data.strengths = handleMultiSelect(data.strengths, value, 3);
-  }
+  const handleStrengthChange = (value: string) => {
+    data.strengths = handleMultiSelect(data.strengths, value, STRENGTH_LIMIT, 'strength');
+  };
 
-  function handleTechnicalSkillChange(value: string) {
-    data.technicalSkills = handleMultiSelect(data.technicalSkills, value, 6);
-  }
+  const handleTechnicalSkillChange = (value: string) => {
+    data.technicalSkills = handleMultiSelect(data.technicalSkills, value, SKILLS_LIMIT, 'skill');
+  };
 
-  function goNext() {
+  const handleExperienceChange = (value: string) => {
+    data.experienceLevel = value;
+    showToast('Experience level updated', 'success');
+  };
+
+  const handleSearch = (event: Event) => {
+    searchQuery = (event.target as HTMLInputElement).value;
+  };
+
+  const handleCategoryFilter = (categoryId: string) => {
+    selectedCategory = categoryId;
+  };
+
+  const clearSearch = () => {
+    searchQuery = '';
+    selectedCategory = 'all';
+  };
+
+  const clearAllSelections = () => {
+    data.strengths = [];
+    data.experienceLevel = '';
+    data.technicalSkills = [];
+    showToast('All selections cleared', 'info');
+  };
+
+  // Optimized toast system
+  const showToast = (message: string, type: ToastType = 'info') => {
+    activeToast = { message, type };
+    
+    // Auto-dismiss after 3 seconds
+    setTimeout(() => {
+      if (activeToast?.message === message) {
+        activeToast = null;
+      }
+    }, 3000);
+  };
+
+  // Optimized navigation with validation
+  const goNext = async () => {
+    // Early validation
     if (data.strengths.length === 0) {
-      alert('Please select at least one strength');
-      return;
-    }
-    if (!data.experienceLevel) {
-      alert('Please select your experience level');
-      return;
-    }
-    if (data.technicalSkills.length === 0) {
-      alert('Please select at least one technical skill');
+      showToast('Please select at least one strength', 'warning');
       return;
     }
     
-    dispatch('complete', {
-      strengths: data.strengths,
-      experienceLevel: data.experienceLevel,
-      technicalSkills: data.technicalSkills
-    });
-  }
+    if (!data.experienceLevel) {
+      showToast('Please select your experience level', 'warning');
+      return;
+    }
+    
+    if (data.technicalSkills.length === 0) {
+      showToast('Please select at least one technical skill', 'warning');
+      return;
+    }
+    
+    isLoading = true;
+    
+    try {
+      // Simulate API call
+      await new Promise(resolve => setTimeout(resolve, 500));
+      
+      dispatch('complete', {
+        strengths: data.strengths,
+        experienceLevel: data.experienceLevel,
+        technicalSkills: data.technicalSkills,
+        timestamp: new Date().toISOString()
+      });
+    } catch (error) {
+      showToast('Failed to save skills', 'warning');
+      console.error('Error saving skills:', error);
+    } finally {
+      isLoading = false;
+    }
+  };
 
-  function goBack() {
+  const goBack = () => {
     dispatch('back');
-  }
+  };
 
-  function isStrengthDisabled(value: string) {
-    return data.strengths.length >= 3 && !data.strengths.includes(value);
-  }
+  // Optimized helper functions using pre-computed lookups
+  const getStrengthIcon = (value: string) => strengthLookup.get(value)?.icon || 'bx-question-mark';
+  const getStrengthLabel = (value: string) => strengthLookup.get(value)?.label || value;
+  const getExperienceIcon = (value: string) => experienceLookup.get(value)?.icon || 'bx-briefcase';
+  const getExperienceLabel = (value: string) => experienceLookup.get(value)?.label || value;
+  const getSkillCategory = (value: string) => skillCategoryLookup.get(value);
 
-  function isTechnicalSkillDisabled(value: string) {
-    return data.technicalSkills.length >= 6 && !data.technicalSkills.includes(value);
-  }
-
-  function getStrengthLabel(value: string) {
-    return strengthOptions.find(option => option.value === value)?.label || value;
-  }
-
-  function getStrengthIcon(value: string) {
-    return strengthOptions.find(option => option.value === value)?.icon || '';
-  }
-
-  function getExperienceLabel(value: string) {
-    return experienceOptions.find(option => option.value === value)?.label || value;
-  }
-
-  function getExperienceIcon(value: string) {
-    return experienceOptions.find(option => option.value === value)?.icon || '';
-  }
+  // Format skill label for display
+  const formatSkillLabel = (skillValue: string) => {
+    return skillValue.split('-')
+      .map(word => word.charAt(0).toUpperCase() + word.slice(1))
+      .join(' ');
+  };
 </script>
 
 <div class="skills-page">
+  <!-- Toast Notification -->
+  {#if activeToast}
+    <div class="toast toast--{activeToast.type}" transition:fade>
+      <i class='bx {activeToast.type === "success" ? "bx-check-circle" : activeToast.type === "warning" ? "bx-error" : "bx-info-circle"}'></i>
+      <span>{activeToast.message}</span>
+      <button class="toast-close" on:click={() => activeToast = null} aria-label="Dismiss notification">
+        <i class='bx bx-x'></i>
+      </button>
+    </div>
+  {/if}
+
   <div class="skills-header">
     <div class="header-content">
       <h1>Skills & Strengths</h1>
-      <p>Showcase your professional capabilities and expertise</p>
+      <p>Showcase your professional capabilities and expertise across all industries</p>
     </div>
   </div>
 
   <div class="center-container">
     <section class="skills-content">
+      <!-- Progress Section -->
       <div class="progress-container">
         <div class="progress-bar">
           <div class="progress-fill" style="width: {progressWidth}"></div>
         </div>
-        <div class="progress-text">Step 1 of 3</div>
+        <div class="progress-text">Step 2 of 4</div>
       </div>
 
       <h2>Build Your Professional Profile</h2>
 
       <!-- Selected Preview -->
-      {#if data.strengths.length > 0 || data.experienceLevel || data.technicalSkills.length > 0}
-        <div class="selection-preview">
+      {#if hasSelections}
+        <div class="selection-preview" transition:fade>
           <div class="preview-header">
             <i class='bx bx-check-circle'></i>
             <h3>Your Selections</h3>
+            <button class="clear-all" on:click={clearAllSelections} aria-label="Clear all selections">
+              <i class='bx bx-trash'></i> Clear All
+            </button>
           </div>
           <div class="preview-items">
             {#if data.strengths.length > 0}
               <div class="preview-category">
-                <h4>Strengths</h4>
+                <h4>Strengths ({selectedStrengthsCount}/{STRENGTH_LIMIT})</h4>
                 <div class="preview-tags">
                   {#each data.strengths as strength}
-                    <span class="preview-tag">
-                      <i class='bx {getStrengthIcon(strength)}'></i> {getStrengthLabel(strength)}
+                    <span class="preview-tag" transition:scale>
+                      <i class='bx {getStrengthIcon(strength)}'></i> 
+                      {getStrengthLabel(strength)}
+                      <button 
+                        class="remove-tag" 
+                        on:click={() => handleStrengthChange(strength)}
+                        aria-label="Remove {getStrengthLabel(strength)}"
+                      >
+                        <i class='bx bx-x'></i>
+                      </button>
                     </span>
                   {/each}
                 </div>
@@ -222,10 +361,18 @@
             
             {#if data.experienceLevel}
               <div class="preview-category">
-                <h4>Experience</h4>
+                <h4>Experience Level</h4>
                 <div class="preview-tags">
                   <span class="preview-tag">
-                    <i class='bx {getExperienceIcon(data.experienceLevel)}'></i> {getExperienceLabel(data.experienceLevel)}
+                    <i class='bx {getExperienceIcon(data.experienceLevel)}'></i> 
+                    {getExperienceLabel(data.experienceLevel)}
+                    <button 
+                      class="remove-tag" 
+                      on:click={() => data.experienceLevel = ''}
+                      aria-label="Remove experience level"
+                    >
+                      <i class='bx bx-x'></i>
+                    </button>
                   </span>
                 </div>
               </div>
@@ -233,12 +380,25 @@
             
             {#if data.technicalSkills.length > 0}
               <div class="preview-category">
-                <h4>Skills</h4>
+                <h4>Skills ({selectedSkillsCount}/{SKILLS_LIMIT})</h4>
                 <div class="preview-tags">
                   {#each data.technicalSkills as skill}
-                    <span class="preview-tag">
-                      {skill.split('-').map(word => word.charAt(0).toUpperCase() + word.slice(1)).join(' ')}
-                    </span>
+                    {#key skill}
+                      {@const category = getSkillCategory(skill)}
+                      <span class="preview-tag" transition:scale>
+                        {#if category}
+                          <i class='bx {category.icon}' style="color: {category.color}"></i>
+                        {/if}
+                        {formatSkillLabel(skill)}
+                        <button 
+                          class="remove-tag" 
+                          on:click={() => handleTechnicalSkillChange(skill)}
+                          aria-label="Remove {formatSkillLabel(skill)}"
+                        >
+                          <i class='bx bx-x'></i>
+                        </button>
+                      </span>
+                    {/key}
                   {/each}
                 </div>
               </div>
@@ -247,67 +407,33 @@
         </div>
       {/if}
 
-      <!-- Strengths -->
+      <!-- Strengths Section -->
       <div class="question-card">
         <div class="question-header">
           <div class="question-title">
             <i class='bx bx-star'></i>
-            <h3>What are your top strengths? <span class="limit-text">(Select up to 3)</span></h3>
+            <h3>What are your top strengths? <span class="limit-text">(Select up to {STRENGTH_LIMIT})</span></h3>
           </div>
           <div class="tooltip">
             <i class='bx bx-info-circle'></i>
-            <span class="tooltiptext">Select the qualities that best represent your professional strengths</span>
+            <span class="tooltiptext">Select the qualities that best represent your professional strengths. Choose up to {STRENGTH_LIMIT}.</span>
           </div>
         </div>
-        <p class="question-description">These personal attributes will help employers understand your work style</p>
+        <p class="question-description">These personal attributes will help employers understand your work style and potential</p>
+        
         <div class="options-grid strength-options">
-          {#each strengthOptions as option}
-            <label class="option-card {isStrengthDisabled(option.value) ? 'disabled' : ''} {data.strengths.includes(option.value) ? 'selected' : ''}">
+          {#each strengthOptions as option (option.id)}
+            <label 
+              class="option-card {isStrengthDisabled(option.value) ? 'disabled' : ''} {data.strengths.includes(option.value) ? 'selected' : ''}"
+              title="{option.description}"
+            >
               <input
                 type="checkbox"
                 value={option.value}
                 checked={data.strengths.includes(option.value)}
                 on:change={() => handleStrengthChange(option.value)}
                 disabled={isStrengthDisabled(option.value)}
-              />
-              <div class="option-content">
-                <div class="option-icon">
-                  <i class='bx {option.icon}'></i>
-                </div>
-                <div class="option-details">
-                  <span class="option-label">{option.label}</span>
-                </div>
-                <div class="checkmark">
-                  <i class='bx bx-check'></i>
-                </div>
-              </div>
-            </label>
-          {/each}
-        </div>
-        {#if data.strengths.length > 0}
-          <div class="selection-count">
-            <i class='bx bx-check-square'></i> Selected: {data.strengths.length}/3
-          </div>
-        {/if}
-      </div>
-
-      <!-- Experience -->
-      <div class="question-card">
-        <div class="question-header">
-          <div class="question-title">
-            <i class='bx bx-briefcase'></i>
-            <h3>What's your professional experience level?</h3>
-          </div>
-        </div>
-        <p class="question-description">This helps match you with appropriate opportunities</p>
-        <div class="options-grid experience-options">
-          {#each experienceOptions as option}
-            <label class="option-card {data.experienceLevel === option.value ? 'selected' : ''}">
-              <input
-                type="radio"
-                name="experience"
-                value={option.value}
-                bind:group={data.experienceLevel}
+                aria-label="{option.label} - {option.description}"
               />
               <div class="option-content">
                 <div class="option-icon">
@@ -324,62 +450,160 @@
             </label>
           {/each}
         </div>
+        
+        {#if selectedStrengthsCount > 0}
+          <div class="selection-count">
+            <i class='bx bx-check-square'></i> 
+            Selected: {selectedStrengthsCount}/{STRENGTH_LIMIT}
+            {#if selectedStrengthsCount === STRENGTH_LIMIT}
+              <span class="limit-reached">Maximum reached</span>
+            {/if}
+          </div>
+        {/if}
       </div>
 
-      <!-- Technical Skills -->
+      <!-- Experience Section -->
+      <div class="question-card">
+        <div class="question-header">
+          <div class="question-title">
+            <i class='bx bx-briefcase'></i>
+            <h3>What's your professional experience level?</h3>
+          </div>
+        </div>
+        <p class="question-description">This helps match you with appropriate opportunities and career paths</p>
+        
+        <div class="options-grid experience-options">
+          {#each experienceOptions as option (option.id)}
+            <label class="option-card {data.experienceLevel === option.value ? 'selected' : ''}">
+              <input
+                type="radio"
+                name="experience"
+                value={option.value}
+                checked={data.experienceLevel === option.value}
+                on:change={() => handleExperienceChange(option.value)}
+                aria-label="{option.label} - {option.description}"
+              />
+              <div class="option-content">
+                <div class="option-icon">
+                  <i class='bx {option.icon}'></i>
+                </div>
+                <div class="option-details">
+                  <span class="option-label">{option.label}</span>
+                  <span class="option-description">{option.description}</span>
+                  <span class="option-meta">{option.years}</span>
+                </div>
+                <div class="checkmark">
+                  <i class='bx bx-check'></i>
+                </div>
+              </div>
+            </label>
+          {/each}
+        </div>
+      </div>
+
+      <!-- Technical Skills Section -->
       <div class="question-card">
         <div class="question-header">
           <div class="question-title">
             <i class='bx bx-wrench'></i>
-            <h3>Select your technical/professional skills <span class="limit-text">(Select up to 6)</span></h3>
+            <h3>Select your professional skills <span class="limit-text">(Select up to {SKILLS_LIMIT})</span></h3>
           </div>
           <div class="tooltip">
             <i class='bx bx-info-circle'></i>
-            <span class="tooltiptext">Choose skills relevant to your field. You can search for specific skills.</span>
+            <span class="tooltiptext">Choose skills relevant to your field. Browse categories or search for specific skills.</span>
           </div>
         </div>
-        <p class="question-description">These are specialized skills related to your field or profession</p>
+        <p class="question-description">Select skills from various industries including healthcare, technology, business, and more</p>
         
-        <div class="search-box">
-          <i class='bx bx-search'></i>
-          <input 
-            type="text" 
-            placeholder="Search skills..." 
-            class="skill-search" 
-            bind:value={searchQuery}
-            on:input={handleSearch}
-          />
+        <!-- Search and Filter Controls -->
+        <div class="skills-controls">
+          <div class="search-box">
+            <i class='bx bx-search'></i>
+            <input 
+              type="text" 
+              placeholder="Search skills across all categories..." 
+              class="skill-search" 
+              bind:value={searchQuery}
+              aria-label="Search skills"
+            />
+            {#if searchQuery}
+              <button class="clear-search" on:click={clearSearch} aria-label="Clear search">
+                <i class='bx bx-x'></i>
+              </button>
+            {/if}
+          </div>
+          
+          <div class="category-filters">
+            <button 
+              class="category-filter {selectedCategory === 'all' ? 'active' : ''}"
+              on:click={() => handleCategoryFilter('all')}
+              aria-label="Show all categories"
+            >
+              All Categories
+            </button>
+            {#each technicalSkillCategories as category (category.id)}
+              <button 
+                class="category-filter {selectedCategory === category.id ? 'active' : ''}"
+                on:click={() => handleCategoryFilter(category.id)}
+                style="--category-color: {category.color}"
+                title="{category.name}"
+                aria-label="Show {category.name} category"
+              >
+                <i class='bx {category.icon}'></i>
+                {category.name}
+              </button>
+            {/each}
+          </div>
         </div>
         
+        <!-- Search Results -->
         {#if searchQuery && filteredCategories.length === 0}
           <div class="no-results">
             <i class='bx bx-search-alt'></i>
             <p>No skills found for "{searchQuery}"</p>
-            <small>Try a different search term or browse the categories below</small>
+            <small>Try a different search term or browse all categories</small>
+            <button class="clear-search-btn" on:click={clearSearch}>
+              Clear Search
+            </button>
           </div>
         {/if}
         
+        <!-- Skills Categories -->
         <div class="skill-categories">
-          {#each filteredCategories as category}
+          {#each filteredCategories as category (category.id)}
             <div class="skill-category">
               <h4 class="category-title">
-                <i class='bx {category.icon}'></i> {category.name}
-                {#if searchQuery}
+                <i class='bx {category.icon}' style="color: {category.color}"></i> 
+                {category.name}
+                {#if searchQuery || selectedCategory !== 'all'}
                   <span class="match-count">({category.skills.length} match{#if category.skills.length !== 1}es{/if})</span>
                 {/if}
               </h4>
               <div class="options-grid skill-options">
-                {#each category.skills as option}
-                  <label class="option-card {isTechnicalSkillDisabled(option.value) ? 'disabled' : ''} {data.technicalSkills.includes(option.value) ? 'selected' : ''}">
+                {#each category.skills as option (option.id)}
+                  <label 
+                    class="option-card {isTechnicalSkillDisabled(option.value) ? 'disabled' : ''} {data.technicalSkills.includes(option.value) ? 'selected' : ''}"
+                  >
                     <input
                       type="checkbox"
                       value={option.value}
                       checked={data.technicalSkills.includes(option.value)}
                       on:change={() => handleTechnicalSkillChange(option.value)}
                       disabled={isTechnicalSkillDisabled(option.value)}
+                      aria-label="{option.label} - {option.popularity}% in demand"
                     />
                     <div class="option-content">
                       <span class="option-label">{option.label}</span>
+                      <div class="skill-meta">
+                        <div class="popularity-bar">
+                          <div 
+                            class="popularity-fill" 
+                            style="width: {option.popularity}%"
+                            title="{option.popularity}% in demand"
+                          ></div>
+                        </div>
+                        <span class="popularity-text">{option.popularity}%</span>
+                      </div>
                       <div class="checkmark">
                         <i class='bx bx-check'></i>
                       </div>
@@ -390,9 +614,14 @@
             </div>
           {/each}
         </div>
-        {#if data.technicalSkills.length > 0}
+        
+        {#if selectedSkillsCount > 0}
           <div class="selection-count">
-            <i class='bx bx-check-square'></i> Selected: {data.technicalSkills.length}/6
+            <i class='bx bx-check-square'></i> 
+            Selected: {selectedSkillsCount}/{SKILLS_LIMIT}
+            {#if selectedSkillsCount === SKILLS_LIMIT}
+              <span class="limit-reached">Maximum reached</span>
+            {/if}
           </div>
         {/if}
       </div>
@@ -402,16 +631,28 @@
         <button class="nav-button secondary" on:click={goBack}>
           <i class='bx bx-chevron-left'></i> Back
         </button>
+        
+        <div class="completion-status">
+          {#if isFormComplete}
+            <i class='bx bx-check-circle'></i>
+            <span>All sections completed</span>
+          {:else}
+            <i class='bx bx-error-circle'></i>
+            <span>Complete all sections to continue</span>
+          {/if}
+        </div>
+        
         <button 
           class="nav-button primary" 
           on:click={goNext} 
-          disabled={
-            data.strengths.length === 0 ||
-            !data.experienceLevel ||
-            data.technicalSkills.length === 0
-          }
+          disabled={!isFormComplete || isLoading}
         >
-          Next <i class='bx bx-chevron-right'></i>
+          {#if isLoading}
+            <i class='bx bx-loader-alt bx-spin'></i>
+            Processing...
+          {:else}
+            Next <i class='bx bx-chevron-right'></i>
+          {/if}
         </button>
       </div>
     </section>
@@ -428,6 +669,62 @@
     background: linear-gradient(135deg, #f8fafc 0%, #f1f5f9 100%);
     font-family: 'Inter', sans-serif;
     color: #1e293b;
+    position: relative;
+  }
+
+  /* Toast Styles */
+  .toast {
+    position: fixed;
+    top: 2rem;
+    right: 2rem;
+    background: white;
+    padding: 1rem 1.5rem;
+    border-radius: 0.75rem;
+    box-shadow: 0 10px 25px rgba(0, 0, 0, 0.15);
+    display: flex;
+    align-items: center;
+    gap: 0.75rem;
+    z-index: 1000;
+    max-width: 400px;
+    border-left: 4px solid;
+    animation: slideInRight 0.3s ease;
+  }
+
+  .toast--success {
+    border-left-color: #10b981;
+  }
+
+  .toast--warning {
+    border-left-color: #f59e0b;
+  }
+
+  .toast--info {
+    border-left-color: #4f46e5;
+  }
+
+  .toast-close {
+    background: none;
+    border: none;
+    color: #64748b;
+    cursor: pointer;
+    padding: 0.25rem;
+    border-radius: 0.25rem;
+    margin-left: auto;
+  }
+
+  .toast-close:hover {
+    background: #f1f5f9;
+  }
+
+  @keyframes slideInRight {
+    from {
+      transform: translateX(100%);
+      opacity: 0;
+    }
+    to {
+      transform: translateX(0);
+      opacity: 1;
+    }
   }
 
   .skills-header {
@@ -537,6 +834,7 @@
   .preview-header {
     display: flex;
     align-items: center;
+    justify-content: space-between;
     margin-bottom: 1rem;
   }
 
@@ -551,6 +849,25 @@
     margin: 0;
     color: #334155;
     font-weight: 600;
+  }
+
+  .clear-all {
+    background: none;
+    border: none;
+    color: #64748b;
+    cursor: pointer;
+    padding: 0.5rem;
+    border-radius: 0.375rem;
+    font-size: 0.875rem;
+    display: flex;
+    align-items: center;
+    gap: 0.25rem;
+    transition: all 0.2s;
+  }
+
+  .clear-all:hover {
+    background-color: #e2e8f0;
+    color: #dc2626;
   }
 
   .preview-items {
@@ -581,7 +898,7 @@
 
   .preview-tag {
     background-color: white;
-    padding: 0.5rem 0.875rem;
+    padding: 0.5rem 0.75rem;
     border-radius: 1.5rem;
     font-size: 0.8rem;
     box-shadow: 0 1px 3px rgba(0,0,0,0.08);
@@ -590,11 +907,30 @@
     gap: 0.4rem;
     border: 1px solid #e2e8f0;
     font-weight: 500;
+    position: relative;
   }
 
   .preview-tag i {
     font-size: 1rem;
-    color: #4f46e5;
+  }
+
+  .remove-tag {
+    background: none;
+    border: none;
+    color: #94a3b8;
+    cursor: pointer;
+    padding: 0.125rem;
+    border-radius: 50%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    transition: all 0.2s;
+    margin-left: 0.25rem;
+  }
+
+  .remove-tag:hover {
+    background-color: #f1f5f9;
+    color: #64748b;
   }
 
   /* Question Cards */
@@ -692,6 +1028,93 @@
     opacity: 1;
   }
 
+  /* Skills Controls */
+  .skills-controls {
+    display: flex;
+    flex-direction: column;
+    gap: 1rem;
+    margin-bottom: 1.5rem;
+  }
+
+  .search-box {
+    position: relative;
+    max-width: 400px;
+  }
+
+  .search-box i {
+    position: absolute;
+    left: 1rem;
+    top: 50%;
+    transform: translateY(-50%);
+    color: #94a3b8;
+  }
+
+  .skill-search {
+    width: 100%;
+    padding: 0.75rem 1rem 0.75rem 2.75rem;
+    border: 1px solid #e2e8f0;
+    border-radius: 0.5rem;
+    font-size: 0.95rem;
+    transition: all 0.2s;
+  }
+
+  .skill-search:focus {
+    outline: none;
+    border-color: #4f46e5;
+    box-shadow: 0 0 0 2px #c7d2fe;
+  }
+
+  .clear-search {
+    position: absolute;
+    right: 0.75rem;
+    top: 50%;
+    transform: translateY(-50%);
+    background: none;
+    border: none;
+    color: #94a3b8;
+    cursor: pointer;
+    padding: 0.25rem;
+    border-radius: 50%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+  }
+
+  .clear-search:hover {
+    background-color: #f1f5f9;
+    color: #64748b;
+  }
+
+  .category-filters {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.5rem;
+  }
+
+  .category-filter {
+    background: white;
+    border: 1px solid #e2e8f0;
+    padding: 0.5rem 1rem;
+    border-radius: 2rem;
+    font-size: 0.875rem;
+    cursor: pointer;
+    transition: all 0.2s;
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+  }
+
+  .category-filter:hover {
+    border-color: var(--category-color, #4f46e5);
+    color: var(--category-color, #4f46e5);
+  }
+
+  .category-filter.active {
+    background-color: var(--category-color, #4f46e5);
+    color: white;
+    border-color: var(--category-color, #4f46e5);
+  }
+
   /* Options Grid */
   .options-grid {
     display: grid;
@@ -755,7 +1178,7 @@
   }
 
   .option-card.selected .option-icon {
-    background: linear-gradient(135deg, #4f46e5 0%, '7c3aed' 100%);
+    background: linear-gradient(135deg, #4f46e5 0%, #7c3aed 100%);
     color: white;
   }
 
@@ -782,6 +1205,12 @@
     line-height: 1.4;
   }
 
+  .option-meta {
+    font-size: 0.75rem;
+    color: #94a3b8;
+    margin-top: 0.25rem;
+  }
+
   .checkmark {
     opacity: 0;
     color: #4f46e5;
@@ -793,34 +1222,33 @@
     opacity: 1;
   }
 
-  /* Search Box */
-  .search-box {
-    position: relative;
-    margin-bottom: 1.5rem;
-    max-width: 400px;
+  /* Skill specific styles */
+  .skill-meta {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    margin-top: 0.5rem;
   }
 
-  .search-box i {
-    position: absolute;
-    left: 1rem;
-    top: 50%;
-    transform: translateY(-50%);
-    color: #94a3b8;
+  .popularity-bar {
+    width: 60px;
+    height: 4px;
+    background-color: #e2e8f0;
+    border-radius: 2px;
+    overflow: hidden;
+    flex-shrink: 0;
   }
 
-  .skill-search {
-    width: 100%;
-    padding: 0.75rem 1rem 0.75rem 2.75rem;
-    border: 1px solid #e2e8f0;
-    border-radius: 0.5rem;
-    font-size: 0.95rem;
-    transition: all 0.2s;
+  .popularity-fill {
+    height: 100%;
+    background: linear-gradient(90deg, #10b981 0%, #34d399 100%);
+    transition: width 0.3s ease;
   }
 
-  .skill-search:focus {
-    outline: none;
-    border-color: #4f46e5;
-    box-shadow: 0 0 0 2px #c7d2fe;
+  .popularity-text {
+    font-size: 0.75rem;
+    color: #64748b;
+    font-weight: 500;
   }
 
   /* No results message */
@@ -848,6 +1276,23 @@
 
   .no-results small {
     font-size: 0.9rem;
+    display: block;
+    margin-bottom: 1rem;
+  }
+
+  .clear-search-btn {
+    background: #4f46e5;
+    color: white;
+    border: none;
+    padding: 0.5rem 1rem;
+    border-radius: 0.375rem;
+    cursor: pointer;
+    font-size: 0.875rem;
+    transition: background-color 0.2s;
+  }
+
+  .clear-search-btn:hover {
+    background: #4338ca;
   }
 
   /* Skill Categories */
@@ -902,10 +1347,17 @@
     color: #10b981;
   }
 
+  .limit-reached {
+    color: #dc2626;
+    font-weight: 500;
+    margin-left: 0.5rem;
+  }
+
   /* Navigation */
   .navigation-buttons {
     display: flex;
     justify-content: space-between;
+    align-items: center;
     margin-top: 3rem;
     gap: 1rem;
   }
@@ -963,10 +1415,47 @@
     color: #64748b;
   }
 
+  .completion-status {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    font-size: 0.875rem;
+    color: #64748b;
+  }
+
+  .completion-status i {
+    font-size: 1.25rem;
+  }
+
+  .completion-status i.bx-check-circle {
+    color: #10b981;
+  }
+
+  .completion-status i.bx-error-circle {
+    color: #f59e0b;
+  }
+
+  /* Loading animation */
+  .bx-loader-alt.bx-spin {
+    animation: spin 1s linear infinite;
+  }
+
+  @keyframes spin {
+    from { transform: rotate(0deg); }
+    to { transform: rotate(360deg); }
+  }
+
   /* Responsive Design */
   @media (max-width: 768px) {
     .skills-page {
       padding: 0;
+    }
+
+    .toast {
+      top: 1rem;
+      right: 1rem;
+      left: 1rem;
+      max-width: none;
     }
 
     .skills-header {
@@ -993,10 +1482,30 @@
 
     .navigation-buttons {
       flex-direction: column;
+      align-items: stretch;
     }
 
     .nav-button {
       width: 100%;
+    }
+
+    .completion-status {
+      order: -1;
+      justify-content: center;
+      margin-bottom: 1rem;
+    }
+
+    .skills-controls {
+      flex-direction: column;
+    }
+
+    .category-filters {
+      justify-content: center;
+    }
+
+    .category-filter {
+      font-size: 0.8rem;
+      padding: 0.375rem 0.75rem;
     }
   }
 
@@ -1015,6 +1524,12 @@
 
     .option-label {
       font-size: 0.9rem;
+    }
+
+    .skill-meta {
+      flex-direction: column;
+      align-items: flex-start;
+      gap: 0.25rem;
     }
   }
 </style>
