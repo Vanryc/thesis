@@ -1,15 +1,23 @@
 <script lang="ts">
   import { createEventDispatcher } from 'svelte';
+  import { fade, scale } from 'svelte/transition';
+  
   const dispatch = createEventDispatcher();
 
-  export let data: {
+  // Define a proper interface for the data object
+  interface WorkPreferences {
     workSetting: string;
     stressHandling: string;
     collaborationPreference: string;
     workSchedule: string;
     managementPreference: string;
     workPace: string;
-  } = {
+  }
+
+  // Use type assertion or proper indexing
+  type WorkPreferenceField = keyof WorkPreferences;
+
+  export let data: WorkPreferences = {
     workSetting: '',
     stressHandling: '',
     collaborationPreference: '',
@@ -20,6 +28,9 @@
 
   export let progressWidth = '75%';
   export let isLoading = false;
+
+  // Reactive state
+  let activeToast: { message: string; type: 'success' | 'warning' | 'info' } | null = null;
 
   const workSettingOptions = [
     { id: 'remote', label: 'Remote', value: 'remote', icon: 'bx-home', description: 'Work from home full-time' },
@@ -61,47 +72,119 @@
     { id: 'variable', label: 'Variable', value: 'variable', icon: 'bx-trending-up', description: 'Mix of busy and quiet periods' }
   ];
 
+  // Pre-computed lookups for better performance
+  const workSettingLookup = new Map(workSettingOptions.map(opt => [opt.value, opt]));
+  const stressHandlingLookup = new Map(stressHandlingOptions.map(opt => [opt.value, opt]));
+  const collaborationLookup = new Map(collaborationOptions.map(opt => [opt.value, opt]));
+  const scheduleLookup = new Map(scheduleOptions.map(opt => [opt.value, opt]));
+  const managementLookup = new Map(managementOptions.map(opt => [opt.value, opt]));
+  const paceLookup = new Map(paceOptions.map(opt => [opt.value, opt]));
+
+  // Field name mappings for better user messages
+  const fieldNameMap: Record<WorkPreferenceField, string> = {
+    workSetting: 'work setting',
+    stressHandling: 'stress handling',
+    collaborationPreference: 'collaboration preference',
+    workSchedule: 'work schedule',
+    managementPreference: 'management preference',
+    workPace: 'work pace'
+  };
+
+  // Reactive declarations
+  $: hasSelections = data.workSetting || data.stressHandling || data.collaborationPreference || 
+                     data.workSchedule || data.managementPreference || data.workPace;
+
+  $: isFormComplete = data.workSetting && data.stressHandling && data.collaborationPreference && 
+                      data.workSchedule && data.managementPreference && data.workPace;
+
+  // Optimized toast system
+  const showToast = (message: string, type: 'success' | 'warning' | 'info' = 'info') => {
+    activeToast = { message, type };
+    
+    // Auto-dismiss after 3 seconds
+    setTimeout(() => {
+      if (activeToast?.message === message) {
+        activeToast = null;
+      }
+    }, 3000);
+  };
+
+  // Helper functions using pre-computed lookups
+  const getOptionLabel = (lookup: Map<string, any>, value: string) => 
+    lookup.get(value)?.label || value;
+
+  const getOptionIcon = (lookup: Map<string, any>, value: string) => 
+    lookup.get(value)?.icon || 'bx-question-mark';
+
+  const getOptionDescription = (lookup: Map<string, any>, value: string) => 
+    lookup.get(value)?.description || '';
+
+  // Fixed function with proper typing
+  const handleSelectionChange = (field: WorkPreferenceField, value: string, displayName: string) => {
+    // Use type-safe assignment
+    data[field] = value;
+    showToast(`${displayName} updated`, 'success');
+  };
+
+  const clearAllSelections = () => {
+    data.workSetting = '';
+    data.stressHandling = '';
+    data.collaborationPreference = '';
+    data.workSchedule = '';
+    data.managementPreference = '';
+    data.workPace = '';
+    showToast('All selections cleared', 'info');
+  };
+
   function goBack() {
     dispatch('back');
   }
 
   function completeQuestionnaire() {
-    const requiredFields = [
-      { field: data.workSetting, name: 'work setting' },
-      { field: data.stressHandling, name: 'stress handling' },
-      { field: data.collaborationPreference, name: 'collaboration preference' },
-      { field: data.workSchedule, name: 'work schedule' },
-      { field: data.managementPreference, name: 'management preference' },
-      { field: data.workPace, name: 'work pace' }
+    const requiredFields: { field: WorkPreferenceField; name: string }[] = [
+      { field: 'workSetting', name: 'work setting' },
+      { field: 'stressHandling', name: 'stress handling' },
+      { field: 'collaborationPreference', name: 'collaboration preference' },
+      { field: 'workSchedule', name: 'work schedule' },
+      { field: 'managementPreference', name: 'management preference' },
+      { field: 'workPace', name: 'work pace' }
     ];
     
     for (const { field, name } of requiredFields) {
-      if (!field) {
-        alert(`Please select your ${name}`);
+      if (!data[field]) {
+        showToast(`Please select your ${name}`, 'warning');
         return;
       }
     }
 
-    dispatch('complete', {
-      workSetting: data.workSetting,
-      stressHandling: data.stressHandling,
-      collaborationPreference: data.collaborationPreference,
-      workSchedule: data.workSchedule,
-      managementPreference: data.managementPreference,
-      workPace: data.workPace
-    });
-  }
-
-  function getOptionLabel(options: any[], value: string) {
-    return options.find(option => option.value === value)?.label || value;
-  }
-
-  function getOptionIcon(options: any[], value: string) {
-    return options.find(option => option.value === value)?.icon || '';
+    isLoading = true;
+    
+    // Simulate processing delay
+    setTimeout(() => {
+      dispatch('complete', {
+        workSetting: data.workSetting,
+        stressHandling: data.stressHandling,
+        collaborationPreference: data.collaborationPreference,
+        workSchedule: data.workSchedule,
+        managementPreference: data.managementPreference,
+        workPace: data.workPace
+      });
+    }, 1500);
   }
 </script>
 
 <div class="work-page">
+  <!-- Toast Notification -->
+  {#if activeToast}
+    <div class="toast toast--{activeToast.type}" transition:fade>
+      <i class='bx {activeToast.type === "success" ? "bx-check-circle" : activeToast.type === "warning" ? "bx-error" : "bx-info-circle"}'></i>
+      <span>{activeToast.message}</span>
+      <button class="toast-close" on:click={() => activeToast = null} aria-label="Dismiss notification">
+        <i class='bx bx-x'></i>
+      </button>
+    </div>
+  {/if}
+
   <div class="work-header">
     <div class="header-content">
       <h1>Work Preferences</h1>
@@ -111,6 +194,7 @@
 
   <div class="center-container">
     <section class="work-content">
+      <!-- Progress Section -->
       <div class="progress-container">
         <div class="progress-bar">
           <div class="progress-fill" style="width: {progressWidth}"></div>
@@ -121,19 +205,30 @@
       <h2>Your Ideal Work Environment</h2>
 
       <!-- Selected Preview -->
-      {#if data.workSetting || data.stressHandling || data.collaborationPreference || data.workSchedule || data.managementPreference || data.workPace}
-        <div class="selection-preview">
+      {#if hasSelections}
+        <div class="selection-preview" transition:fade>
           <div class="preview-header">
             <i class='bx bx-check-circle'></i>
             <h3>Your Selections</h3>
+            <button class="clear-all" on:click={clearAllSelections} aria-label="Clear all selections">
+              <i class='bx bx-trash'></i> Clear All
+            </button>
           </div>
           <div class="preview-items">
             {#if data.workSetting}
               <div class="preview-category">
                 <h4>Work Setting</h4>
                 <div class="preview-tags">
-                  <span class="preview-tag">
-                    <i class='bx {getOptionIcon(workSettingOptions, data.workSetting)}'></i> {getOptionLabel(workSettingOptions, data.workSetting)}
+                  <span class="preview-tag" transition:scale>
+                    <i class='bx {getOptionIcon(workSettingLookup, data.workSetting)}'></i> 
+                    {getOptionLabel(workSettingLookup, data.workSetting)}
+                    <button 
+                      class="remove-tag" 
+                      on:click={() => data.workSetting = ''}
+                      aria-label="Remove work setting"
+                    >
+                      <i class='bx bx-x'></i>
+                    </button>
                   </span>
                 </div>
               </div>
@@ -143,8 +238,16 @@
               <div class="preview-category">
                 <h4>Stress Handling</h4>
                 <div class="preview-tags">
-                  <span class="preview-tag">
-                    <i class='bx {getOptionIcon(stressHandlingOptions, data.stressHandling)}'></i> {getOptionLabel(stressHandlingOptions, data.stressHandling)}
+                  <span class="preview-tag" transition:scale>
+                    <i class='bx {getOptionIcon(stressHandlingLookup, data.stressHandling)}'></i> 
+                    {getOptionLabel(stressHandlingLookup, data.stressHandling)}
+                    <button 
+                      class="remove-tag" 
+                      on:click={() => data.stressHandling = ''}
+                      aria-label="Remove stress handling preference"
+                    >
+                      <i class='bx bx-x'></i>
+                    </button>
                   </span>
                 </div>
               </div>
@@ -154,8 +257,16 @@
               <div class="preview-category">
                 <h4>Collaboration</h4>
                 <div class="preview-tags">
-                  <span class="preview-tag">
-                    <i class='bx {getOptionIcon(collaborationOptions, data.collaborationPreference)}'></i> {getOptionLabel(collaborationOptions, data.collaborationPreference)}
+                  <span class="preview-tag" transition:scale>
+                    <i class='bx {getOptionIcon(collaborationLookup, data.collaborationPreference)}'></i> 
+                    {getOptionLabel(collaborationLookup, data.collaborationPreference)}
+                    <button 
+                      class="remove-tag" 
+                      on:click={() => data.collaborationPreference = ''}
+                      aria-label="Remove collaboration preference"
+                    >
+                      <i class='bx bx-x'></i>
+                    </button>
                   </span>
                 </div>
               </div>
@@ -165,8 +276,16 @@
               <div class="preview-category">
                 <h4>Schedule</h4>
                 <div class="preview-tags">
-                  <span class="preview-tag">
-                    <i class='bx {getOptionIcon(scheduleOptions, data.workSchedule)}'></i> {getOptionLabel(scheduleOptions, data.workSchedule)}
+                  <span class="preview-tag" transition:scale>
+                    <i class='bx {getOptionIcon(scheduleLookup, data.workSchedule)}'></i> 
+                    {getOptionLabel(scheduleLookup, data.workSchedule)}
+                    <button 
+                      class="remove-tag" 
+                      on:click={() => data.workSchedule = ''}
+                      aria-label="Remove work schedule preference"
+                    >
+                      <i class='bx bx-x'></i>
+                    </button>
                   </span>
                 </div>
               </div>
@@ -176,8 +295,16 @@
               <div class="preview-category">
                 <h4>Management</h4>
                 <div class="preview-tags">
-                  <span class="preview-tag">
-                    <i class='bx {getOptionIcon(managementOptions, data.managementPreference)}'></i> {getOptionLabel(managementOptions, data.managementPreference)}
+                  <span class="preview-tag" transition:scale>
+                    <i class='bx {getOptionIcon(managementLookup, data.managementPreference)}'></i> 
+                    {getOptionLabel(managementLookup, data.managementPreference)}
+                    <button 
+                      class="remove-tag" 
+                      on:click={() => data.managementPreference = ''}
+                      aria-label="Remove management preference"
+                    >
+                      <i class='bx bx-x'></i>
+                    </button>
                   </span>
                 </div>
               </div>
@@ -187,8 +314,16 @@
               <div class="preview-category">
                 <h4>Work Pace</h4>
                 <div class="preview-tags">
-                  <span class="preview-tag">
-                    <i class='bx {getOptionIcon(paceOptions, data.workPace)}'></i> {getOptionLabel(paceOptions, data.workPace)}
+                  <span class="preview-tag" transition:scale>
+                    <i class='bx {getOptionIcon(paceLookup, data.workPace)}'></i> 
+                    {getOptionLabel(paceLookup, data.workPace)}
+                    <button 
+                      class="remove-tag" 
+                      on:click={() => data.workPace = ''}
+                      aria-label="Remove work pace preference"
+                    >
+                      <i class='bx bx-x'></i>
+                    </button>
                   </span>
                 </div>
               </div>
@@ -211,13 +346,15 @@
         </div>
         <p class="question-description">This helps us understand your ideal physical work environment</p>
         <div class="options-grid">
-          {#each workSettingOptions as option}
+          {#each workSettingOptions as option (option.id)}
             <label class="option-card {data.workSetting === option.value ? 'selected' : ''}">
               <input
                 type="radio"
                 name="workSetting"
                 value={option.value}
-                bind:group={data.workSetting}
+                checked={data.workSetting === option.value}
+                on:change={() => handleSelectionChange('workSetting', option.value, 'Work setting')}
+                aria-label="{option.label} - {option.description}"
               />
               <div class="option-content">
                 <div class="option-icon">
@@ -249,13 +386,15 @@
           </div>
         </div>
         <div class="options-grid">
-          {#each stressHandlingOptions as option}
+          {#each stressHandlingOptions as option (option.id)}
             <label class="option-card {data.stressHandling === option.value ? 'selected' : ''}">
               <input
                 type="radio"
                 name="stressHandling"
                 value={option.value}
-                bind:group={data.stressHandling}
+                checked={data.stressHandling === option.value}
+                on:change={() => handleSelectionChange('stressHandling', option.value, 'Stress handling')}
+                aria-label="{option.label} - {option.description}"
               />
               <div class="option-content">
                 <div class="option-icon">
@@ -287,13 +426,15 @@
           </div>
         </div>
         <div class="options-grid">
-          {#each collaborationOptions as option}
+          {#each collaborationOptions as option (option.id)}
             <label class="option-card {data.collaborationPreference === option.value ? 'selected' : ''}">
               <input
                 type="radio"
                 name="collaboration"
                 value={option.value}
-                bind:group={data.collaborationPreference}
+                checked={data.collaborationPreference === option.value}
+                on:change={() => handleSelectionChange('collaborationPreference', option.value, 'Collaboration preference')}
+                aria-label="{option.label} - {option.description}"
               />
               <div class="option-content">
                 <div class="option-icon">
@@ -325,13 +466,15 @@
           </div>
         </div>
         <div class="options-grid">
-          {#each scheduleOptions as option}
+          {#each scheduleOptions as option (option.id)}
             <label class="option-card {data.workSchedule === option.value ? 'selected' : ''}">
               <input
                 type="radio"
                 name="schedule"
                 value={option.value}
-                bind:group={data.workSchedule}
+                checked={data.workSchedule === option.value}
+                on:change={() => handleSelectionChange('workSchedule', option.value, 'Work schedule')}
+                aria-label="{option.label} - {option.description}"
               />
               <div class="option-content">
                 <div class="option-icon">
@@ -363,13 +506,15 @@
           </div>
         </div>
         <div class="options-grid">
-          {#each managementOptions as option}
+          {#each managementOptions as option (option.id)}
             <label class="option-card {data.managementPreference === option.value ? 'selected' : ''}">
               <input
                 type="radio"
                 name="management"
                 value={option.value}
-                bind:group={data.managementPreference}
+                checked={data.managementPreference === option.value}
+                on:change={() => handleSelectionChange('managementPreference', option.value, 'Management preference')}
+                aria-label="{option.label} - {option.description}"
               />
               <div class="option-content">
                 <div class="option-icon">
@@ -401,13 +546,15 @@
           </div>
         </div>
         <div class="options-grid">
-          {#each paceOptions as option}
+          {#each paceOptions as option (option.id)}
             <label class="option-card {data.workPace === option.value ? 'selected' : ''}">
               <input
                 type="radio"
                 name="pace"
                 value={option.value}
-                bind:group={data.workPace}
+                checked={data.workPace === option.value}
+                on:change={() => handleSelectionChange('workPace', option.value, 'Work pace')}
+                aria-label="{option.label} - {option.description}"
               />
               <div class="option-content">
                 <div class="option-icon">
@@ -431,46 +578,25 @@
         <button class="nav-button secondary" on:click={goBack} disabled={isLoading}>
           <i class='bx bx-chevron-left'></i> Back
         </button>
-        <button
-          class="nav-button primary"
-          on:click={completeQuestionnaire}
-          disabled={
-            !data.workSetting ||
-            !data.stressHandling ||
-            !data.collaborationPreference ||
-            !data.workSchedule ||
-            !data.managementPreference ||
-            !data.workPace ||
-            isLoading
-          }>
+        
+        <div class="completion-status">
+          {#if isFormComplete}
+            <i class='bx bx-check-circle'></i>
+            <span>All sections completed</span>
+          {:else}
+            <i class='bx bx-error-circle'></i>
+            <span>Complete all sections to continue</span>
+          {/if}
+        </div>
+        
+        <button 
+          class="nav-button primary" 
+          on:click={completeQuestionnaire} 
+          disabled={!isFormComplete || isLoading}
+        >
           {#if isLoading}
-            <!-- Loading state with new SVG loader -->
-            <div class="loader-container">
-              <svg class="gegga">
-                <defs>
-                    <filter id="gegga">
-                        <feGaussianBlur in="SourceGraphic" stdDeviation="7" result="blur"></feGaussianBlur>
-                        <feColorMatrix in="blur" mode="matrix" values="1 0 0 0 0 0 1 0 0 0 0 0 1 0 0 0 0 0 20 -10" result="inreGegga"></feColorMatrix>
-                        <feComposite in="SourceGraphic" in2="inreGegga" operator="atop"></feComposite>
-                    </filter>
-                </defs>
-              </svg>
-              <svg class="snurra" width="30" height="30" viewBox="0 0 200 200">
-                <defs>
-                    <linearGradient id="linjärGradient">
-                        <stop class="stopp1" offset="0"></stop>
-                        <stop class="stopp2" offset="1"></stop>
-                    </linearGradient>
-                    <linearGradient y2="160" x2="160" y1="40" x1="40" gradientUnits="userSpaceOnUse" id="gradient" xlink:href="#linjärGradient"></linearGradient>
-                </defs>
-                <path class="halvan" d="m 164,100 c 0,-35.346224 -28.65378,-64 -64,-64 -35.346224,0 -64,28.653776 -64,64 0,35.34622 28.653776,64 64,64 35.34622,0 64,-26.21502 64,-64 0,-37.784981 -26.92058,-64 -64,-64 -37.079421,0 -65.267479,26.922736 -64,64 1.267479,37.07726 26.703171,65.05317 64,64 37.29683,-1.05317 64,-64 64,-64"></path>
-                <circle class="strecken" cx="100" cy="100" r="64"></circle>
-              </svg>
-              <svg class="skugga" width="30" height="30" viewBox="0 0 200 200">
-                <path class="halvan" d="m 164,100 c 0,-35.346224 -28.65378,-64 -64,-64 -35.346224,0 -64,28.653776 -64,64 0,35.34622 28.653776,64 64,64 35.34622,0 64,-26.21502 64,-64 0,-37.784981 -26.92058,-64 -64,-64 -37.079421,0 -65.267479,26.922736 -64,64 1.267479,37.07726 26.703171,65.05317 64,64 37.29683,-1.05317 64,-64 64,-64"></path>
-                <circle class="strecken" cx="100" cy="100" r="64"></circle>
-              </svg>
-            </div>
+            <i class='bx bx-loader-alt bx-spin'></i>
+            Processing...
           {:else}
             See My Results <i class='bx bx-chevron-right'></i>
           {/if}
@@ -523,6 +649,61 @@
     font-family: 'Inter', sans-serif;
     color: #1e293b;
     position: relative;
+  }
+
+  /* Toast Styles */
+  .toast {
+    position: fixed;
+    top: 2rem;
+    right: 2rem;
+    background: white;
+    padding: 1rem 1.5rem;
+    border-radius: 0.75rem;
+    box-shadow: 0 10px 25px rgba(0, 0, 0, 0.15);
+    display: flex;
+    align-items: center;
+    gap: 0.75rem;
+    z-index: 1000;
+    max-width: 400px;
+    border-left: 4px solid;
+    animation: slideInRight 0.3s ease;
+  }
+
+  .toast--success {
+    border-left-color: #10b981;
+  }
+
+  .toast--warning {
+    border-left-color: #f59e0b;
+  }
+
+  .toast--info {
+    border-left-color: #4f46e5;
+  }
+
+  .toast-close {
+    background: none;
+    border: none;
+    color: #64748b;
+    cursor: pointer;
+    padding: 0.25rem;
+    border-radius: 0.25rem;
+    margin-left: auto;
+  }
+
+  .toast-close:hover {
+    background: #f1f5f9;
+  }
+
+  @keyframes slideInRight {
+    from {
+      transform: translateX(100%);
+      opacity: 0;
+    }
+    to {
+      transform: translateX(0);
+      opacity: 1;
+    }
   }
 
   .work-header {
@@ -632,6 +813,7 @@
   .preview-header {
     display: flex;
     align-items: center;
+    justify-content: space-between;
     margin-bottom: 1rem;
   }
 
@@ -646,6 +828,25 @@
     margin: 0;
     color: #334155;
     font-weight: 600;
+  }
+
+  .clear-all {
+    background: none;
+    border: none;
+    color: #64748b;
+    cursor: pointer;
+    padding: 0.5rem;
+    border-radius: 0.375rem;
+    font-size: 0.875rem;
+    display: flex;
+    align-items: center;
+    gap: 0.25rem;
+    transition: all 0.2s;
+  }
+
+  .clear-all:hover {
+    background-color: #e2e8f0;
+    color: #dc2626;
   }
 
   .preview-items {
@@ -676,7 +877,7 @@
 
   .preview-tag {
     background-color: white;
-    padding: 0.5rem 0.875rem;
+    padding: 0.5rem 0.75rem;
     border-radius: 1.5rem;
     font-size: 0.8rem;
     box-shadow: 0 1px 3px rgba(0,0,0,0.08);
@@ -685,11 +886,30 @@
     gap: 0.4rem;
     border: 1px solid #e2e8f0;
     font-weight: 500;
+    position: relative;
   }
 
   .preview-tag i {
     font-size: 1rem;
-    color: #4f46e5;
+  }
+
+  .remove-tag {
+    background: none;
+    border: none;
+    color: #94a3b8;
+    cursor: pointer;
+    padding: 0.125rem;
+    border-radius: 50%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    transition: all 0.2s;
+    margin-left: 0.25rem;
+  }
+
+  .remove-tag:hover {
+    background-color: #f1f5f9;
+    color: #64748b;
   }
 
   /* Question Cards */
@@ -880,6 +1100,7 @@
   .navigation-buttons {
     display: flex;
     justify-content: space-between;
+    align-items: center;
     margin-top: 3rem;
     gap: 1rem;
   }
@@ -937,16 +1158,27 @@
     color: #64748b;
   }
 
-  /* Loader styles */
-  .loader-container {
+  .completion-status {
     display: flex;
     align-items: center;
-    justify-content: center;
-    width: 30px;
-    height: 30px;
-    position: relative;
+    gap: 0.5rem;
+    font-size: 0.875rem;
+    color: #64748b;
   }
-  
+
+  .completion-status i {
+    font-size: 1.25rem;
+  }
+
+  .completion-status i.bx-check-circle {
+    color: #10b981;
+  }
+
+  .completion-status i.bx-error-circle {
+    color: #f59e0b;
+  }
+
+  /* Loader styles */
   .loader-overlay {
     position: fixed;
     top: 0;
@@ -1019,10 +1251,27 @@
     }
   }
 
+  /* Loading animation */
+  .bx-loader-alt.bx-spin {
+    animation: spin 1s linear infinite;
+  }
+
+  @keyframes spin {
+    from { transform: rotate(0deg); }
+    to { transform: rotate(360deg); }
+  }
+
   /* Responsive Design */
   @media (max-width: 768px) {
     .work-page {
       padding: 0;
+    }
+
+    .toast {
+      top: 1rem;
+      right: 1rem;
+      left: 1rem;
+      max-width: none;
     }
 
     .work-header {
@@ -1049,10 +1298,17 @@
 
     .navigation-buttons {
       flex-direction: column;
+      align-items: stretch;
     }
 
     .nav-button {
       width: 100%;
+    }
+
+    .completion-status {
+      order: -1;
+      justify-content: center;
+      margin-bottom: 1rem;
     }
   }
 
