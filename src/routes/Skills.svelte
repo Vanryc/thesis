@@ -51,7 +51,7 @@
     { id: 'executive', label: 'Executive/Manager', value: 'executive', description: 'Leadership role', icon: 'bx-trending-up', years: '8+ years' }
   ];
 
-  // Optimized skill data structure with lazy loading potential
+  // Updated skill data structure without popularity and with new categories
   const technicalSkillCategories = [
     {
       id: 'healthcare',
@@ -59,11 +59,11 @@
       icon: 'bx-plus-medical',
       color: '#dc2626',
       skills: [
-        { id: 'patient-care', label: 'Patient Care', value: 'patient-care', category: 'healthcare', popularity: 95 },
-        { id: 'medical-diagnosis', label: 'Medical Diagnosis', value: 'medical-diagnosis', category: 'healthcare', popularity: 90 },
-        { id: 'surgical-skills', label: 'Surgical Skills', value: 'surgical-skills', category: 'healthcare', popularity: 85 },
-        { id: 'pharmaceutical-knowledge', label: 'Pharmaceutical Knowledge', value: 'pharmaceutical-knowledge', category: 'healthcare', popularity: 80 },
-        { id: 'medical-research', label: 'Medical Research', value: 'medical-research', category: 'healthcare', popularity: 75 }
+        { id: 'patient-care', label: 'Patient Care', value: 'patient-care', category: 'healthcare' },
+        { id: 'medical-diagnosis', label: 'Medical Diagnosis', value: 'medical-diagnosis', category: 'healthcare' },
+        { id: 'surgical-skills', label: 'Surgical Skills', value: 'surgical-skills', category: 'healthcare' },
+        { id: 'pharmaceutical-knowledge', label: 'Pharmaceutical Knowledge', value: 'pharmaceutical-knowledge', category: 'healthcare' },
+        { id: 'medical-research', label: 'Medical Research', value: 'medical-research', category: 'healthcare' }
       ]
     },
     {
@@ -72,11 +72,11 @@
       icon: 'bx-code-alt',
       color: '#4f46e5',
       skills: [
-        { id: 'programming', label: 'Programming', value: 'programming', category: 'technology', popularity: 95 },
-        { id: 'web-development', label: 'Web Development', value: 'web-development', category: 'technology', popularity: 90 },
-        { id: 'mobile-development', label: 'Mobile Development', value: 'mobile-development', category: 'technology', popularity: 85 },
-        { id: 'cloud-computing', label: 'Cloud Computing', value: 'cloud-computing', category: 'technology', popularity: 88 },
-        { id: 'cybersecurity', label: 'Cybersecurity', value: 'cybersecurity', category: 'technology', popularity: 92 }
+        { id: 'programming', label: 'Programming', value: 'programming', category: 'technology' },
+        { id: 'web-development', label: 'Web Development', value: 'web-development', category: 'technology' },
+        { id: 'mobile-development', label: 'Mobile Development', value: 'mobile-development', category: 'technology' },
+        { id: 'cloud-computing', label: 'Cloud Computing', value: 'cloud-computing', category: 'technology' },
+        { id: 'cybersecurity', label: 'Cybersecurity', value: 'cybersecurity', category: 'technology' }
       ]
     },
     {
@@ -85,11 +85,11 @@
       icon: 'bx-building',
       color: '#7c3aed',
       skills: [
-        { id: 'project-management', label: 'Project Management', value: 'project-management', category: 'business', popularity: 90 },
-        { id: 'financial-analysis', label: 'Financial Analysis', value: 'financial-analysis', category: 'business', popularity: 85 },
-        { id: 'marketing-strategy', label: 'Marketing Strategy', value: 'marketing-strategy', category: 'business', popularity: 88 },
-        { id: 'sales-skills', label: 'Sales Skills', value: 'sales-skills', category: 'business', popularity: 87 },
-        { id: 'business-development', label: 'Business Development', value: 'business-development', category: 'business', popularity: 84 }
+        { id: 'project-management', label: 'Project Management', value: 'project-management', category: 'business' },
+        { id: 'financial-analysis', label: 'Financial Analysis', value: 'financial-analysis', category: 'business' },
+        { id: 'marketing-strategy', label: 'Marketing Strategy', value: 'marketing-strategy', category: 'business' },
+        { id: 'sales-skills', label: 'Sales Skills', value: 'sales-skills', category: 'business' },
+        { id: 'business-development', label: 'Business Development', value: 'business-development', category: 'business' }
       ]
     },
     {
@@ -98,11 +98,89 @@
       icon: 'bx-palette',
       color: '#ec4899',
       skills: [
-        { id: 'graphic-design', label: 'Graphic Design', value: 'graphic-design', category: 'creative', popularity: 85 },
-        { id: 'ui-ux-design', label: 'UI/UX Design', value: 'ui-ux-design', category: 'creative', popularity: 92 },
-        { id: 'video-editing', label: 'Video Editing', value: 'video-editing', category: 'creative', popularity: 83 },
-        { id: 'content-writing', label: 'Content Writing', value: 'content-writing', category: 'creative', popularity: 87 },
-        { id: 'digital-illustration', label: 'Digital Illustration', value: 'digital-illustration', category: 'creative', popularity: 80 }
+        { id: 'graphic-design', label: 'Graphic Design', value: 'graphic-design', category: 'creative' },
+        { id: 'ui-ux-design', label: 'UI/UX Design', value: 'ui-ux-design', category: 'creative' },
+        { id: 'video-editing', label: 'Video Editing', value: 'video-editing', category: 'creative' },
+        { id: 'content-writing', label: 'Content Writing', value: 'content-writing', category: 'creative' },
+        { id: 'digital-illustration', label: 'Digital Illustration', value: 'digital-illustration', category: 'creative' }
+      ]
+    },
+    {
+      id: 'trades',
+      name: 'Skilled Trades',
+      icon: 'bx-wrench',
+      color: '#f59e0b',
+      skills: [
+        { id: 'electrical-work', label: 'Electrical Work', value: 'electrical-work', category: 'trades' },
+        { id: 'plumbing', label: 'Plumbing', value: 'plumbing', category: 'trades' },
+        { id: 'carpentry', label: 'Carpentry', value: 'carpentry', category: 'trades' },
+        { id: 'automotive-repair', label: 'Automotive Repair', value: 'automotive-repair', category: 'trades' },
+        { id: 'welding', label: 'Welding', value: 'welding', category: 'trades' }
+      ]
+    },
+    {
+      id: 'hospitality',
+      name: 'Hospitality & Service',
+      icon: 'bx-restaurant',
+      color: '#10b981',
+      skills: [
+        { id: 'culinary-arts', label: 'Culinary Arts', value: 'culinary-arts', category: 'hospitality' },
+        { id: 'hotel-management', label: 'Hotel Management', value: 'hotel-management', category: 'hospitality' },
+        { id: 'customer-service', label: 'Customer Service', value: 'customer-service', category: 'hospitality' },
+        { id: 'event-planning', label: 'Event Planning', value: 'event-planning', category: 'hospitality' },
+        { id: 'tourism', label: 'Tourism', value: 'tourism', category: 'hospitality' }
+      ]
+    },
+    {
+      id: 'logistics',
+      name: 'Logistics & Transportation',
+      icon: 'bx-truck',
+      color: '#8b5cf6',
+      skills: [
+        { id: 'supply-chain', label: 'Supply Chain Management', value: 'supply-chain', category: 'logistics' },
+        { id: 'warehouse-operations', label: 'Warehouse Operations', value: 'warehouse-operations', category: 'logistics' },
+        { id: 'inventory-management', label: 'Inventory Management', value: 'inventory-management', category: 'logistics' },
+        { id: 'commercial-driving', label: 'Commercial Driving', value: 'commercial-driving', category: 'logistics' },
+        { id: 'fleet-management', label: 'Fleet Management', value: 'fleet-management', category: 'logistics' }
+      ]
+    },
+    {
+      id: 'construction',
+      name: 'Construction & Manufacturing',
+      icon: 'bx-building-house',
+      color: '#ef4444',
+      skills: [
+        { id: 'construction-management', label: 'Construction Management', value: 'construction-management', category: 'construction' },
+        { id: 'blueprint-reading', label: 'Blueprint Reading', value: 'blueprint-reading', category: 'construction' },
+        { id: 'equipment-operation', label: 'Equipment Operation', value: 'equipment-operation', category: 'construction' },
+        { id: 'quality-control', label: 'Quality Control', value: 'quality-control', category: 'construction' },
+        { id: 'safety-compliance', label: 'Safety Compliance', value: 'safety-compliance', category: 'construction' }
+      ]
+    },
+    {
+      id: 'administrative',
+      name: 'Administrative & Office',
+      icon: 'bx-file',
+      color: '#6b7280',
+      skills: [
+        { id: 'office-administration', label: 'Office Administration', value: 'office-administration', category: 'administrative' },
+        { id: 'data-entry', label: 'Data Entry', value: 'data-entry', category: 'administrative' },
+        { id: 'bookkeeping', label: 'Bookkeeping', value: 'bookkeeping', category: 'administrative' },
+        { id: 'reception-skills', label: 'Reception Skills', value: 'reception-skills', category: 'administrative' },
+        { id: 'records-management', label: 'Records Management', value: 'records-management', category: 'administrative' }
+      ]
+    },
+    {
+      id: 'personal-care',
+      name: 'Personal Care & Wellness',
+      icon: 'bx-heart',
+      color: '#ec4899',
+      skills: [
+        { id: 'cosmetology', label: 'Cosmetology', value: 'cosmetology', category: 'personal-care' },
+        { id: 'fitness-training', label: 'Fitness Training', value: 'fitness-training', category: 'personal-care' },
+        { id: 'massage-therapy', label: 'Massage Therapy', value: 'massage-therapy', category: 'personal-care' },
+        { id: 'elderly-care', label: 'Elderly Care', value: 'elderly-care', category: 'personal-care' },
+        { id: 'child-care', label: 'Child Care', value: 'child-care', category: 'personal-care' }
       ]
     }
   ];
@@ -513,7 +591,7 @@
             <span class="tooltiptext">Choose skills relevant to your field. Browse categories or search for specific skills.</span>
           </div>
         </div>
-        <p class="question-description">Select skills from various industries including healthcare, technology, business, and more</p>
+        <p class="question-description">Select skills from various industries including skilled trades, healthcare, technology, and more</p>
         
         <!-- Search and Filter Controls -->
         <div class="skills-controls">
@@ -590,20 +668,10 @@
                       checked={data.technicalSkills.includes(option.value)}
                       on:change={() => handleTechnicalSkillChange(option.value)}
                       disabled={isTechnicalSkillDisabled(option.value)}
-                      aria-label="{option.label} - {option.popularity}% in demand"
+                      aria-label="{option.label}"
                     />
                     <div class="option-content">
                       <span class="option-label">{option.label}</span>
-                      <div class="skill-meta">
-                        <div class="popularity-bar">
-                          <div 
-                            class="popularity-fill" 
-                            style="width: {option.popularity}%"
-                            title="{option.popularity}% in demand"
-                          ></div>
-                        </div>
-                        <span class="popularity-text">{option.popularity}%</span>
-                      </div>
                       <div class="checkmark">
                         <i class='bx bx-check'></i>
                       </div>
@@ -1222,35 +1290,6 @@
     opacity: 1;
   }
 
-  /* Skill specific styles */
-  .skill-meta {
-    display: flex;
-    align-items: center;
-    gap: 0.5rem;
-    margin-top: 0.5rem;
-  }
-
-  .popularity-bar {
-    width: 60px;
-    height: 4px;
-    background-color: #e2e8f0;
-    border-radius: 2px;
-    overflow: hidden;
-    flex-shrink: 0;
-  }
-
-  .popularity-fill {
-    height: 100%;
-    background: linear-gradient(90deg, #10b981 0%, #34d399 100%);
-    transition: width 0.3s ease;
-  }
-
-  .popularity-text {
-    font-size: 0.75rem;
-    color: #64748b;
-    font-weight: 500;
-  }
-
   /* No results message */
   .no-results {
     text-align: center;
@@ -1524,12 +1563,6 @@
 
     .option-label {
       font-size: 0.9rem;
-    }
-
-    .skill-meta {
-      flex-direction: column;
-      align-items: flex-start;
-      gap: 0.25rem;
     }
   }
 </style>
