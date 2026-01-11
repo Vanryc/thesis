@@ -1,14 +1,20 @@
-<!-- Skills.svelte -->
+<!-- Preferences.svelte -->
 <script lang="ts">
   import { createEventDispatcher, onMount } from 'svelte';
-  import { fade, scale } from 'svelte/transition';  // Corrected import path
+  import { fade, scale } from 'svelte/transition';
   
   const dispatch = createEventDispatcher();
 
-  // Types for better type safety
-  type SkillData = {
-    strengths: string[];
-    technicalSkills: string[];
+  // Type definitions for better type safety
+  type WorkPreferenceData = {
+    workTypes: string[];
+    salaryExpectation: string;
+    workMotivation: string;
+    educationLevel: string;
+    educationField: string;
+    workExperience: string;
+    strengths?: string[];
+    technicalSkills?: string[];
   };
 
   type ToastType = 'success' | 'warning' | 'info';
@@ -33,246 +39,172 @@
     textMuted: '#94a3b8'
   };
 
-  export let data: SkillData = {
-    strengths: [],
-    technicalSkills: []
+  // Initialize with default values
+  export let data: WorkPreferenceData = {
+    workTypes: [],
+    salaryExpectation: '',
+    workMotivation: '',
+    educationLevel: '',
+    educationField: '',
+    workExperience: '',
   };
 
-  export let progressWidth = '50%';
+  export let progressWidth = '33%';
 
   // Reactive state
   let searchQuery = '';
   let isLoading = false;
   let selectedCategory = 'all';
   let activeToast: { message: string; type: ToastType } | null = null;
+  let sessionId = generateSessionId();
+  let isSubmitting = false;
 
-  // Constants
-  const STRENGTH_LIMIT = 3;
-  const SKILLS_LIMIT = 6;
-
-  const strengthOptions = [
-    { id: 'leadership', label: 'Leadership', value: 'leadership', icon: 'fa-solid fa-crown', description: 'Guiding and motivating teams', gradient: 'from-purple-500 to-indigo-500' },
-    { id: 'teamwork', label: 'Teamwork', value: 'teamwork', icon: 'fa-solid fa-people-group', description: 'Collaborating effectively with others', gradient: 'from-emerald-500 to-teal-500' },
-    { id: 'creativity', label: 'Creativity', value: 'creativity', icon: 'fa-solid fa-palette', description: 'Generating innovative ideas', gradient: 'from-pink-500 to-rose-500' },
-    { id: 'problem-solving', label: 'Problem Solving', value: 'problem-solving', icon: 'fa-solid fa-puzzle-piece', description: 'Analyzing and resolving challenges', gradient: 'from-blue-500 to-cyan-500' },
-    { id: 'adaptability', label: 'Adaptability', value: 'adaptability', icon: 'fa-solid fa-arrows-rotate', description: 'Adjusting to changing circumstances', gradient: 'from-amber-500 to-orange-500' },
-    { id: 'communication', label: 'Communication', value: 'communication', icon: 'fa-solid fa-comments', description: 'Expressing ideas clearly', gradient: 'from-sky-500 to-blue-500' },
-    { id: 'time-management', label: 'Time Management', value: 'time-management', icon: 'fa-solid fa-clock', description: 'Prioritizing tasks efficiently', gradient: 'from-violet-500 to-purple-500' },
-    { id: 'critical-thinking', label: 'Critical Thinking', value: 'critical-thinking', icon: 'fa-solid fa-brain', description: 'Evaluating information logically', gradient: 'from-indigo-500 to-blue-500' }
+  // Constants for options
+  const WORK_TYPE_LIMIT = 3;
+  
+  const workTypeOptions = [
+    { id: 'creative', label: 'Creative', value: 'creative', icon: 'fa-solid fa-palette', description: 'Design, writing, arts', gradient: 'from-pink-500 to-rose-500' },
+    { id: 'analytical', label: 'Analytical', value: 'analytical', icon: 'fa-solid fa-chart-line', description: 'Data analysis, research', gradient: 'from-blue-500 to-cyan-500' },
+    { id: 'technical', label: 'Technical', value: 'technical', icon: 'fa-solid fa-code', description: 'Engineering, programming', gradient: 'from-purple-500 to-indigo-500' },
+    { id: 'handsOn', label: 'Hands-on', value: 'handsOn', icon: 'fa-solid fa-wrench', description: 'Construction, manufacturing', gradient: 'from-amber-500 to-orange-500' },
+    { id: 'social', label: 'Social', value: 'social', icon: 'fa-solid fa-users', description: 'Teaching, counseling, service', gradient: 'from-emerald-500 to-teal-500' },
+    { id: 'structured', label: 'Structured', value: 'structured', icon: 'fa-solid fa-list-check', description: 'Accounting, administration', gradient: 'from-slate-500 to-gray-500' },
+    { id: 'leadership', label: 'Leadership', value: 'leadership', icon: 'fa-solid fa-chart-simple', description: 'Team leading, management', gradient: 'from-violet-500 to-purple-500' },
+    { id: 'entrepreneurial', label: 'Entrepreneurial', value: 'entrepreneurial', icon: 'fa-solid fa-lightbulb', description: 'Startups, business', gradient: 'from-yellow-500 to-amber-500' },
+    { id: 'scientific', label: 'Scientific', value: 'scientific', icon: 'fa-solid fa-flask', description: 'Biology, chemistry', gradient: 'from-red-500 to-pink-500' },
+    { id: 'healthcare', label: 'Healthcare', value: 'healthcare', icon: 'fa-solid fa-stethoscope', description: 'Nursing, medicine', gradient: 'from-rose-500 to-pink-500' },
+    { id: 'outdoor', label: 'Outdoor', value: 'outdoor', icon: 'fa-solid fa-tree', description: 'Agriculture, forestry', gradient: 'from-green-500 to-emerald-500' },
+    { id: 'digital', label: 'Digital', value: 'digital', icon: 'fa-solid fa-globe', description: 'Online work, remote', gradient: 'from-indigo-500 to-blue-500' },
+    { id: 'logistical', label: 'Logistical', value: 'logistical', icon: 'fa-solid fa-boxes-stacked', description: 'Supply chain, operations', gradient: 'from-gray-500 to-slate-500' },
+    { id: 'artistic', label: 'Artistic', value: 'artistic', icon: 'fa-solid fa-music', description: 'Performing, visual arts', gradient: 'from-fuchsia-500 to-pink-500' },
+    { id: 'financial', label: 'Financial', value: 'financial', icon: 'fa-solid fa-dollar-sign', description: 'Banking, investment', gradient: 'from-amber-500 to-yellow-500' },
+    { id: 'legal', label: 'Legal', value: 'legal', icon: 'fa-solid fa-scale-balanced', description: 'Law, compliance', gradient: 'from-stone-500 to-neutral-500' },
+    { id: 'educational', label: 'Educational', value: 'educational', icon: 'fa-solid fa-book-open', description: 'Teaching, training', gradient: 'from-sky-500 to-blue-500' },
+    { id: 'environmental', label: 'Environmental', value: 'environmental', icon: 'fa-solid fa-leaf', description: 'Sustainability', gradient: 'from-lime-500 to-green-500' },
+    { id: 'sales', label: 'Sales', value: 'sales', icon: 'fa-solid fa-chart-column', description: 'Business development', gradient: 'from-orange-500 to-amber-500' },
+    { id: 'support', label: 'Support', value: 'support', icon: 'fa-solid fa-headset', description: 'HR, office management', gradient: 'from-zinc-500 to-gray-500' }
   ];
 
-  const technicalSkillCategories = [
-    {
-      id: 'healthcare',
-      name: 'Healthcare & Medicine',
-      icon: 'fa-solid fa-stethoscope',
-      gradient: 'from-rose-500 to-pink-500',
-      skills: [
-        { id: 'patient-care', label: 'Patient Care', value: 'patient-care', category: 'healthcare' },
-        { id: 'medical-diagnosis', label: 'Medical Diagnosis', value: 'medical-diagnosis', category: 'healthcare' },
-        { id: 'pharmaceutical', label: 'Pharmaceutical Knowledge', value: 'pharmaceutical', category: 'healthcare' },
-        { id: 'medical-research', label: 'Medical Research', value: 'medical-research', category: 'healthcare' },
-        { id: 'lab-techniques', label: 'Lab Techniques', value: 'lab-techniques', category: 'healthcare' }
-      ]
-    },
-    {
-      id: 'technology',
-      name: 'Technology & IT',
-      icon: 'fa-solid fa-laptop-code',
-      gradient: 'from-purple-500 to-indigo-500',
-      skills: [
-        { id: 'programming', label: 'Programming', value: 'programming', category: 'technology' },
-        { id: 'web-development', label: 'Web Development', value: 'web-development', category: 'technology' },
-        { id: 'mobile-development', label: 'Mobile Development', value: 'mobile-development', category: 'technology' },
-        { id: 'data-analysis', label: 'Data Analysis', value: 'data-analysis', category: 'technology' },
-        { id: 'cybersecurity', label: 'Cybersecurity', value: 'cybersecurity', category: 'technology' }
-      ]
-    },
-    {
-      id: 'business',
-      name: 'Business & Management',
-      icon: 'fa-solid fa-building',
-      gradient: 'from-amber-500 to-orange-500',
-      skills: [
-        { id: 'project-management', label: 'Project Management', value: 'project-management', category: 'business' },
-        { id: 'financial-analysis', label: 'Financial Analysis', value: 'financial-analysis', category: 'business' },
-        { id: 'marketing-strategy', label: 'Marketing Strategy', value: 'marketing-strategy', category: 'business' },
-        { id: 'sales-skills', label: 'Sales Skills', value: 'sales-skills', category: 'business' },
-        { id: 'business-planning', label: 'Business Planning', value: 'business-planning', category: 'business' }
-      ]
-    },
-    {
-      id: 'creative',
-      name: 'Creative & Design',
-      icon: 'fa-solid fa-paintbrush',
-      gradient: 'from-pink-500 to-rose-500',
-      skills: [
-        { id: 'graphic-design', label: 'Graphic Design', value: 'graphic-design', category: 'creative' },
-        { id: 'ui-ux-design', label: 'UI/UX Design', value: 'ui-ux-design', category: 'creative' },
-        { id: 'video-editing', label: 'Video Editing', value: 'video-editing', category: 'creative' },
-        { id: 'content-writing', label: 'Content Writing', value: 'content-writing', category: 'creative' },
-        { id: 'digital-illustration', label: 'Digital Illustration', value: 'digital-illustration', category: 'creative' }
-      ]
-    },
-    {
-      id: 'research',
-      name: 'Research & Academics',
-      icon: 'fa-solid fa-book-open',
-      gradient: 'from-emerald-500 to-teal-500',
-      skills: [
-        { id: 'academic-writing', label: 'Academic Writing', value: 'academic-writing', category: 'research' },
-        { id: 'data-collection', label: 'Data Collection', value: 'data-collection', category: 'research' },
-        { id: 'statistical-analysis', label: 'Statistical Analysis', value: 'statistical-analysis', category: 'research' },
-        { id: 'literature-review', label: 'Literature Review', value: 'literature-review', category: 'research' },
-        { id: 'presentation-skills', label: 'Presentation Skills', value: 'presentation-skills', category: 'research' }
-      ]
-    },
-    {
-      id: 'education',
-      name: 'Education & Teaching',
-      icon: 'fa-solid fa-chalkboard-user',
-      gradient: 'from-yellow-500 to-amber-500',
-      skills: [
-        { id: 'lesson-planning', label: 'Lesson Planning', value: 'lesson-planning', category: 'education' },
-        { id: 'classroom-management', label: 'Classroom Management', value: 'classroom-management', category: 'education' },
-        { id: 'tutoring', label: 'Tutoring', value: 'tutoring', category: 'education' },
-        { id: 'educational-technology', label: 'Educational Technology', value: 'educational-technology', category: 'education' },
-        { id: 'curriculum-development', label: 'Curriculum Development', value: 'curriculum-development', category: 'education' }
-      ]
-    },
-    {
-      id: 'engineering',
-      name: 'Engineering & Technical',
-      icon: 'fa-solid fa-gears',
-      gradient: 'from-violet-500 to-purple-500',
-      skills: [
-        { id: 'cad-design', label: 'CAD Design', value: 'cad-design', category: 'engineering' },
-        { id: 'prototyping', label: 'Prototyping', value: 'prototyping', category: 'engineering' },
-        { id: 'technical-drawing', label: 'Technical Drawing', value: 'technical-drawing', category: 'engineering' },
-        { id: 'materials-science', label: 'Materials Science', value: 'materials-science', category: 'engineering' },
-        { id: 'quality-control', label: 'Quality Control', value: 'quality-control', category: 'engineering' }
-      ]
-    },
-    {
-      id: 'social-sciences',
-      name: 'Social Sciences',
-      icon: 'fa-solid fa-globe',
-      gradient: 'from-blue-500 to-cyan-500',
-      skills: [
-        { id: 'research-methodology', label: 'Research Methodology', value: 'research-methodology', category: 'social-sciences' },
-        { id: 'data-interpretation', label: 'Data Interpretation', value: 'data-interpretation', category: 'social-sciences' },
-        { id: 'survey-design', label: 'Survey Design', value: 'survey-design', category: 'social-sciences' },
-        { id: 'policy-analysis', label: 'Policy Analysis', value: 'policy-analysis', category: 'social-sciences' },
-        { id: 'cross-cultural', label: 'Cross-cultural Communication', value: 'cross-cultural', category: 'social-sciences' }
-      ]
-    },
-    {
-      id: 'administrative',
-      name: 'Administrative & Office',
-      icon: 'fa-solid fa-file',
-      gradient: 'from-slate-500 to-gray-500',
-      skills: [
-        { id: 'office-administration', label: 'Office Administration', value: 'office-administration', category: 'administrative' },
-        { id: 'data-entry', label: 'Data Entry', value: 'data-entry', category: 'administrative' },
-        { id: 'bookkeeping', label: 'Bookkeeping', value: 'bookkeeping', category: 'administrative' },
-        { id: 'event-planning', label: 'Event Planning', value: 'event-planning', category: 'administrative' },
-        { id: 'records-management', label: 'Records Management', value: 'records-management', category: 'administrative' }
-      ]
-    },
-    {
-      id: 'communications',
-      name: 'Communications & Media',
-      icon: 'fa-solid fa-broadcast-tower',
-      gradient: 'from-fuchsia-500 to-pink-500',
-      skills: [
-        { id: 'social-media', label: 'Social Media Management', value: 'social-media', category: 'communications' },
-        { id: 'public-speaking', label: 'Public Speaking', value: 'public-speaking', category: 'communications' },
-        { id: 'journalism', label: 'Journalism', value: 'journalism', category: 'communications' },
-        { id: 'digital-marketing', label: 'Digital Marketing', value: 'digital-marketing', category: 'communications' },
-        { id: 'brand-management', label: 'Brand Management', value: 'brand-management', category: 'communications' }
-      ]
-    }
+  const salaryOptions = [
+    { id: 'entry', label: 'Entry Level', value: 'entry', description: 'Starting career journey', icon: 'fa-solid fa-rocket', gradient: 'from-blue-500 to-cyan-500' },
+    { id: 'average', label: 'Average', value: 'average', description: 'Industry standards', icon: 'fa-solid fa-chart-line', gradient: 'from-purple-500 to-indigo-500' },
+    { id: 'competitive', label: 'Competitive', value: 'competitive', description: 'Above average starting', icon: 'fa-solid fa-trophy', gradient: 'from-amber-500 to-orange-500' }
   ];
 
-  const allSkills = technicalSkillCategories.flatMap(category => 
-    category.skills.map(skill => ({ ...skill, categoryId: category.id }))
-  );
-
-  const skillCategories = [
-    { id: 'all', name: 'All Skills', icon: 'fa-solid fa-border-all', gradient: 'from-gray-500 to-slate-500' },
-    ...technicalSkillCategories.map(cat => ({
-      id: cat.id,
-      name: cat.name,
-      icon: cat.icon,
-      gradient: cat.gradient
-    }))
+  const motivationOptions = [
+    { id: 'impact', label: 'Make Impact', value: 'impact', icon: 'fa-solid fa-bullseye', description: 'Creating meaningful change', gradient: 'from-emerald-500 to-teal-500' },
+    { id: 'security', label: 'Security', value: 'security', icon: 'fa-solid fa-shield', description: 'Stable employment & growth', gradient: 'from-blue-500 to-indigo-500' },
+    { id: 'growth', label: 'Growth', value: 'growth', icon: 'fa-solid fa-chart-line', description: 'Career advancement', gradient: 'from-purple-500 to-pink-500' },
+    { id: 'balance', label: 'Balance', value: 'balance', icon: 'fa-solid fa-scale-balanced', description: 'Work-life harmony', gradient: 'from-cyan-500 to-blue-500' }
   ];
 
-  const strengthLookup = new Map(strengthOptions.map(opt => [opt.value, opt]));
-  const skillLookup = new Map(allSkills.map(skill => [skill.value, skill]));
-  const skillCategoryLookup = new Map();
-  
-  technicalSkillCategories.forEach(category => {
-    category.skills.forEach(skill => {
-      skillCategoryLookup.set(skill.value, category);
-    });
-  });
+  // Updated education options for college years only with Font Awesome icons
+  const educationOptions = [
+    { id: 'first', label: 'Freshman', value: 'first', description: 'First year student', icon: 'fa-solid fa-user-plus', gradient: 'from-sky-500 to-blue-500' },
+    { id: 'second', label: 'Sophomore', value: 'second', description: 'Second year student', icon: 'fa-solid fa-user', gradient: 'from-purple-500 to-indigo-500' },
+    { id: 'third', label: 'Junior', value: 'third', description: 'Third year student', icon: 'fa-solid fa-user-check', gradient: 'from-amber-500 to-orange-500' },
+    { id: 'fourth', label: 'Senior', value: 'fourth', description: 'Final year student', icon: 'fa-solid fa-user-graduate', gradient: 'from-emerald-500 to-teal-500' }
+  ];
 
-  // FIXED: Proper completion checks
-  $: selectedSkillsCount = data.technicalSkills.length;
-  $: selectedStrengthsCount = data.strengths.length;
-  
-  $: hasSelections = data.strengths.length > 0 || 
-                     data.technicalSkills.length > 0;
-  
-  // FIXED: Both sections must be completed
-  $: isFormComplete = data.strengths.length > 0 && 
-                      data.technicalSkills.length > 0;
+  const educationFieldOptions = [
+    { id: 'cs', label: 'Computer Science', value: 'Computer Science', icon: 'fa-solid fa-laptop-code', gradient: 'from-purple-500 to-indigo-500' },
+    { id: 'engineering', label: 'Engineering', value: 'Engineering', icon: 'fa-solid fa-gears', gradient: 'from-blue-500 to-cyan-500' },
+    { id: 'business', label: 'Business', value: 'Business', icon: 'fa-solid fa-building', gradient: 'from-amber-500 to-orange-500' },
+    { id: 'health', label: 'Health Sciences', value: 'Health Sciences', icon: 'fa-solid fa-stethoscope', gradient: 'from-rose-500 to-pink-500' },
+    { id: 'arts', label: 'Arts & Humanities', value: 'Arts & Humanities', icon: 'fa-solid fa-palette', gradient: 'from-pink-500 to-rose-500' },
+    { id: 'science', label: 'Natural Sciences', value: 'Natural Sciences', icon: 'fa-solid fa-atom', gradient: 'from-emerald-500 to-teal-500' },
+    { id: 'social', label: 'Social Sciences', value: 'Social Sciences', icon: 'fa-solid fa-users', gradient: 'from-sky-500 to-blue-500' },
+    { id: 'education', label: 'Education', value: 'Education', icon: 'fa-solid fa-book-open', gradient: 'from-violet-500 to-purple-500' },
+    { id: 'communications', label: 'Communications', value: 'Communications', icon: 'fa-solid fa-comments', gradient: 'from-cyan-500 to-blue-500' },
+    { id: 'undeclared', label: 'Undeclared', value: 'Undeclared', icon: 'fa-solid fa-compass', gradient: 'from-slate-500 to-gray-500' }
+  ];
 
-  $: completionCount = (data.strengths.length > 0 ? 1 : 0) +
-                       (data.technicalSkills.length > 0 ? 1 : 0);
+  // Work type categories for filtering
+  const workTypeCategories = [
+    { id: 'all', name: 'All Types', icon: 'fa-solid fa-border-all', gradient: 'from-gray-500 to-slate-500' },
+    { id: 'creative', name: 'Creative', icon: 'fa-solid fa-palette', gradient: 'from-pink-500 to-rose-500' },
+    { id: 'technical', name: 'Technical', icon: 'fa-solid fa-code', gradient: 'from-purple-500 to-indigo-500' },
+    { id: 'business', name: 'Business', icon: 'fa-solid fa-building', gradient: 'from-amber-500 to-orange-500' },
+    { id: 'social', name: 'Social', icon: 'fa-solid fa-users', gradient: 'from-emerald-500 to-teal-500' },
+    { id: 'scientific', name: 'Scientific', icon: 'fa-solid fa-flask', gradient: 'from-red-500 to-pink-500' },
+    { id: 'organizational', name: 'Organizational', icon: 'fa-solid fa-list-check', gradient: 'from-slate-500 to-gray-500' }
+  ];
 
-  $: filteredSkills = (() => {
+  // Pre-computed lookups for better performance
+  const workTypeLookup = new Map(workTypeOptions.map(opt => [opt.value, opt]));
+  const salaryLookup = new Map(salaryOptions.map(opt => [opt.value, opt]));
+  const motivationLookup = new Map(motivationOptions.map(opt => [opt.value, opt]));
+  const educationLookup = new Map(educationOptions.map(opt => [opt.value, opt]));
+  const educationFieldLookup = new Map(educationFieldOptions.map(opt => [opt.value, opt]));
+
+  // Helper function to generate session ID
+  function generateSessionId(): string {
+    return `session_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+  }
+
+  // Optimized reactive declarations
+  $: selectedWorkTypesCount = data.workTypes.length;
+  
+  // FIXED: Proper form completion check - all 5 sections must be filled
+  $: isFormComplete = data.workTypes.length > 0 && 
+                      data.salaryExpectation !== '' && 
+                      data.workMotivation !== '' && 
+                      data.educationLevel !== '' && 
+                      data.educationField !== '';
+
+  // FIXED: Calculate completion count properly
+  $: completionCount = (data.workTypes.length > 0 ? 1 : 0) +
+                      (data.salaryExpectation ? 1 : 0) +
+                      (data.workMotivation ? 1 : 0) +
+                      (data.educationLevel ? 1 : 0) +
+                      (data.educationField ? 1 : 0);
+
+  $: hasSelections = data.workTypes.length > 0 || 
+                     data.salaryExpectation || 
+                     data.workMotivation || 
+                     data.educationLevel || 
+                     data.educationField;
+
+  // Optimized disabled state checks
+  $: isWorkTypeDisabled = (value: string) => 
+    data.workTypes.length >= WORK_TYPE_LIMIT && !data.workTypes.includes(value);
+
+  // Optimized filtering with early returns
+  $: filteredWorkTypes = (() => {
     const query = searchQuery.trim().toLowerCase();
-    const categoryFilter = selectedCategory;
+    const isAllCategory = selectedCategory === 'all';
     
-    if (!query && categoryFilter === 'all') {
-      return allSkills;
+    // Fast path: no filters applied
+    if (!query && isAllCategory) {
+      return workTypeOptions;
     }
 
-    return allSkills.filter(skill => {
+    return workTypeOptions.filter(option => {
       const matchesSearch = !query || 
-        skill.label.toLowerCase().includes(query) || 
-        skill.value.toLowerCase().includes(query);
+        option.label.toLowerCase().includes(query) || 
+        option.value.toLowerCase().includes(query) ||
+        option.description.toLowerCase().includes(query);
       
-      const matchesCategory = categoryFilter === 'all' || skill.categoryId === categoryFilter;
+      const matchesCategory = isAllCategory || option.category === selectedCategory;
       
       return matchesSearch && matchesCategory;
     });
   })();
 
-  onMount(() => {
-    console.log('Skills component mounted');
-    console.log('Initial skills state:', {
-      strengths: data.strengths.length,
-      technicalSkills: data.technicalSkills.length,
+  // Lifecycle
+  onMount(async () => {
+    console.log('Preferences component mounted');
+    console.log('Initial form state:', {
+      workTypes: data.workTypes.length,
+      salary: data.salaryExpectation,
+      motivation: data.workMotivation,
+      educationLevel: data.educationLevel,
+      educationField: data.educationField,
       isFormComplete: isFormComplete
     });
   });
 
-  const getStrengthIcon = (value: string) => strengthLookup.get(value)?.icon || 'fa-solid fa-question';
-  const getStrengthLabel = (value: string) => strengthLookup.get(value)?.label || value;
-  const getStrengthGradient = (value: string) => strengthLookup.get(value)?.gradient || 'from-gray-500 to-slate-500';
-  
-  const getSkillCategory = (value: string) => skillCategoryLookup.get(value);
-  const getSkillLabel = (value: string) => skillLookup.get(value)?.label || value;
-  
-  const isStrengthDisabled = (value: string) => 
-    data.strengths.length >= STRENGTH_LIMIT && !data.strengths.includes(value);
-  
-  const isTechnicalSkillDisabled = (value: string) => 
-    data.technicalSkills.length >= SKILLS_LIMIT && !data.technicalSkills.includes(value);
-
+  // Optimized event handlers
   const handleMultiSelect = (field: string[], value: string, max: number, type: string) => {
     const index = field.indexOf(value);
     
@@ -289,12 +221,33 @@
     return field.filter(item => item !== value);
   };
 
-  const handleStrengthChange = (value: string) => {
-    data.strengths = handleMultiSelect(data.strengths, value, STRENGTH_LIMIT, 'strength');
+  const handleWorkTypeChange = (value: string) => {
+    data.workTypes = handleMultiSelect(data.workTypes, value, WORK_TYPE_LIMIT, 'work type');
   };
 
-  const handleTechnicalSkillChange = (value: string) => {
-    data.technicalSkills = handleMultiSelect(data.technicalSkills, value, SKILLS_LIMIT, 'skill');
+  const handleEducationLevelChange = (value: string) => {
+    data.educationLevel = value;
+    data.educationField = data.educationField || '';
+    showToast('College year updated', 'success');
+  };
+
+  const handleSalaryChange = (value: string) => {
+    data.salaryExpectation = value;
+    showToast('Salary expectation updated', 'success');
+  };
+
+  const handleMotivationChange = (value: string) => {
+    data.workMotivation = value;
+    showToast('Work motivation updated', 'success');
+  };
+
+  const handleEducationFieldChange = (value: string) => {
+    data.educationField = value;
+    showToast('Major/field of study updated', 'success');
+  };
+
+  const handleSearch = (event: Event) => {
+    searchQuery = (event.target as HTMLInputElement).value;
   };
 
   const handleCategoryFilter = (categoryId: string) => {
@@ -307,38 +260,61 @@
   };
 
   const clearAllSelections = () => {
-    data.strengths = [];
-    data.technicalSkills = [];
+    data.workTypes = [];
+    data.salaryExpectation = '';
+    data.workMotivation = '';
+    data.educationLevel = '';
+    data.educationField = '';
     showToast('All selections cleared', 'info');
   };
 
+  // Optimized toast system
   const showToast = (message: string, type: ToastType = 'info') => {
-    if (activeToast?.message === message) return;
-    
     activeToast = { message, type };
     
+    // Auto-dismiss after 3 seconds
     setTimeout(() => {
-      activeToast = null;
+      if (activeToast?.message === message) {
+        activeToast = null;
+      }
     }, 3000);
   };
 
-  // FIXED: Enhanced goNext function with detailed validation
-  const goNext = async () => {
+  // FIXED: Simplified navigation - just pass data to parent
+  const nextQuestion = async () => {
     console.log('Next button clicked');
-    console.log('Current skills state:', {
-      strengths: data.strengths.length,
-      technicalSkills: data.technicalSkills.length,
+    console.log('Current form state:', {
+      workTypes: data.workTypes.length,
+      salary: data.salaryExpectation,
+      motivation: data.workMotivation,
+      educationLevel: data.educationLevel,
+      educationField: data.educationField,
       isFormComplete: isFormComplete
     });
     
-    // Detailed validation
-    if (data.strengths.length === 0) {
-      showToast('Please select at least one strength', 'warning');
+    // Detailed validation with specific error messages
+    if (data.workTypes.length === 0) {
+      showToast('Please select at least one work type', 'warning');
       return;
     }
     
-    if (data.technicalSkills.length === 0) {
-      showToast('Please select at least one skill', 'warning');
+    if (!data.salaryExpectation) {
+      showToast('Please select your salary expectation', 'warning');
+      return;
+    }
+    
+    if (!data.workMotivation) {
+      showToast('Please select your work motivation', 'warning');
+      return;
+    }
+    
+    if (!data.educationLevel) {
+      showToast('Please select your college year', 'warning');
+      return;
+    }
+    
+    if (!data.educationField) {
+      showToast('Please select your major/field of study', 'warning');
       return;
     }
     
@@ -346,31 +322,55 @@
     isLoading = true;
     
     try {
-      await new Promise(resolve => setTimeout(resolve, 300));
-      
+      // Prepare data for dispatch
       const completionData = {
-        strengths: data.strengths,
-        technicalSkills: data.technicalSkills,
-        timestamp: new Date().toISOString()
+        workTypes: data.workTypes,
+        salaryExpectation: data.salaryExpectation,
+        workMotivation: data.workMotivation,
+        educationLevel: data.educationLevel,
+        educationField: data.educationField,
+        workExperience: data.workExperience || 'none',
+        timestamp: new Date().toISOString(),
+        sessionId: sessionId
       };
       
       console.log('Dispatching complete event with data:', completionData);
       dispatch('complete', completionData);
       
     } catch (error) {
-      console.error('Error saving skills:', error);
-      showToast('Failed to save skills. Please try again.', 'warning');
+      console.error('Error saving preferences:', error);
+      showToast('Failed to save preferences. Please try again.', 'warning');
     } finally {
       isLoading = false;
     }
   };
 
   const goBack = () => {
-    dispatch('back');
+    dispatch('backToHome');
   };
+
+  // Optimized helper functions using pre-computed lookups
+  const getWorkTypeLabel = (value: string) => workTypeLookup.get(value)?.label || value;
+  const getWorkTypeIcon = (value: string) => workTypeLookup.get(value)?.icon || '';
+  const getWorkTypeGradient = (value: string) => workTypeLookup.get(value)?.gradient || 'from-gray-500 to-slate-500';
+  const getSalaryIcon = (value: string) => salaryLookup.get(value)?.icon || '';
+  const getSalaryLabel = (value: string) => salaryLookup.get(value)?.label || value;
+  const getSalaryGradient = (value: string) => salaryLookup.get(value)?.gradient || 'from-blue-500 to-cyan-500';
+  const getMotivationLabel = (value: string) => motivationLookup.get(value)?.label || value;
+  const getMotivationIcon = (value: string) => motivationLookup.get(value)?.icon || '';
+  const getMotivationGradient = (value: string) => motivationLookup.get(value)?.gradient || 'from-emerald-500 to-teal-500';
+  const getEducationLabel = (value: string) => educationLookup.get(value)?.label || value;
+  const getEducationIcon = (value: string) => educationLookup.get(value)?.icon || '';
+  const getEducationGradient = (value: string) => educationLookup.get(value)?.gradient || 'from-sky-500 to-blue-500';
+  const getEducationFieldIcon = (value: string) => educationFieldLookup.get(value)?.icon || '';
+  const getEducationFieldGradient = (value: string) => educationFieldLookup.get(value)?.gradient || 'from-purple-500 to-indigo-500';
+
+  // Helper to get education description
+  const getEducationDescription = (value: string) => educationLookup.get(value)?.description || '';
 </script>
 
-<div class="skills-page">
+<div class="preferences-page">
+  <!-- Toast Notification -->
   {#if activeToast}
     <div class="toast toast--{activeToast.type}" transition:fade>
       <div class="toast-icon">
@@ -395,6 +395,7 @@
     </div>
   {/if}
 
+  <!-- Background Elements -->
   <div class="background-elements">
     <div class="bg-gradient"></div>
     <div class="bg-particle"></div>
@@ -402,18 +403,19 @@
     <div class="bg-particle"></div>
   </div>
 
-  <div class="skills-header">
+  <div class="preferences-header">
     <div class="header-content">
       <div class="header-title">
         <i class="fa-solid fa-graduation-cap header-icon"></i>
         <h1>Career Pathfinder</h1>
       </div>
-      <p class="header-subtitle">Build your student profile with academic strengths and developing skills</p>
+      <p class="header-subtitle">Discover opportunities that match your college journey</p>
     </div>
   </div>
 
   <div class="full-width-container">
-    <section class="skills-content">
+    <section class="preferences-content">
+      <!-- Progress Section -->
       <div class="progress-container">
         <div class="progress-info">
           <div class="progress-step">
@@ -425,7 +427,7 @@
               <div class="progress-fill" style="width: {progressWidth}"></div>
             </div>
           </div>
-          <div class="progress-step">
+          <div class="progress-step active">
             <div class="step-number">2</div>
             <span class="step-label">Preferences</span>
           </div>
@@ -434,7 +436,7 @@
               <div class="progress-fill" style="width: {progressWidth}"></div>
             </div>
           </div>
-          <div class="progress-step active">
+          <div class="progress-step">
             <div class="step-number">3</div>
             <span class="step-label">Skills</span>
           </div>
@@ -457,52 +459,53 @@
             <span class="step-label">Results</span>
           </div>
         </div>
-        <div class="progress-text">Step 3 of 5 • {Math.round(parseInt(progressWidth))}% complete</div>
+        <div class="progress-text">Step 2 of 5 • {Math.round(parseInt(progressWidth))}% complete</div>
       </div>
 
       <div class="content-header">
         <div class="content-title">
-          <h2>Showcase Your Skills</h2>
-          <p class="content-subtitle">Highlight your academic strengths and technical skills for career opportunities</p>
+          <h2>Shape Your Future</h2>
+          <p class="content-subtitle">Select preferences that align with your career aspirations</p>
         </div>
         <div class="selection-counter">
           <div class="counter-badge">
             <i class="fa-solid fa-check"></i>
-            <span>{selectedSkillsCount + selectedStrengthsCount}/{SKILLS_LIMIT + STRENGTH_LIMIT} selections</span>
+            <span>{selectedWorkTypesCount}/{WORK_TYPE_LIMIT} selections</span>
           </div>
         </div>
       </div>
 
+      <!-- Selected Preview -->
       {#if hasSelections}
         <div class="selection-preview" transition:fade>
           <div class="preview-header">
             <div class="preview-title">
               <i class="fa-solid fa-badge-check preview-icon"></i>
               <h3>Your Selections</h3>
-              <span class="preview-count">({selectedStrengthsCount + selectedSkillsCount} items)</span>
+              <span class="preview-count">({data.workTypes.length + (data.salaryExpectation ? 1 : 0) + (data.workMotivation ? 1 : 0) + (data.educationLevel ? 1 : 0) + (data.educationField ? 1 : 0)} items)</span>
             </div>
             <button class="clear-all" on:click={clearAllSelections} aria-label="Clear all selections">
               <i class="fa-solid fa-trash"></i> Clear All
             </button>
           </div>
           <div class="preview-items">
-            {#if data.strengths.length > 0}
+            {#if data.workTypes.length > 0}
               <div class="preview-category">
                 <div class="category-header">
-                  <h4>Strengths</h4>
-                  <span class="category-count">{selectedStrengthsCount}/{STRENGTH_LIMIT}</span>
+                  <h4>Work Types</h4>
+                  <span class="category-count">{data.workTypes.length}/{WORK_TYPE_LIMIT}</span>
                 </div>
                 <div class="preview-tags">
-                  {#each data.strengths as strength}
-                    <span class="preview-tag" transition:scale style="--tag-gradient: var(--gradient-{strength})">
-                      <div class="tag-icon" style="background: linear-gradient(135deg, {getStrengthGradient(strength).replace('from-', '').replace('to-', '').replace(' ', ', ')})">
-                        <i class="{getStrengthIcon(strength)}"></i>
+                  {#each data.workTypes as type}
+                    <span class="preview-tag" transition:scale style="--tag-gradient: var(--gradient-{type})">
+                      <div class="tag-icon">
+                        <i class="{getWorkTypeIcon(type)}"></i>
                       </div>
-                      <span class="tag-label">{getStrengthLabel(strength)}</span>
+                      <span class="tag-label">{getWorkTypeLabel(type)}</span>
                       <button 
                         class="remove-tag" 
-                        on:click={() => handleStrengthChange(strength)}
-                        aria-label="Remove {getStrengthLabel(strength)}"
+                        on:click={() => handleWorkTypeChange(type)}
+                        aria-label="Remove {getWorkTypeLabel(type)}"
                       >
                         <i class="fa-solid fa-xmark"></i>
                       </button>
@@ -512,30 +515,86 @@
               </div>
             {/if}
             
-            {#if data.technicalSkills.length > 0}
+            {#if data.salaryExpectation}
               <div class="preview-category">
-                <div class="category-header">
-                  <h4>Skills</h4>
-                  <span class="category-count">{selectedSkillsCount}/{SKILLS_LIMIT}</span>
-                </div>
+                <h4>Salary Expectations</h4>
                 <div class="preview-tags">
-                  {#each data.technicalSkills as skillValue}
-                    {@const category = getSkillCategory(skillValue)}
-                    {@const skillLabel = getSkillLabel(skillValue)}
-                    <span class="preview-tag skill-tag" transition:scale>
-                      <div class="tag-icon" style="background: linear-gradient(135deg, {category?.gradient?.replace('from-', '').replace('to-', '').replace(' ', ', ')})">
-                        <i class="{category?.icon}"></i>
-                      </div>
-                      <span class="tag-label">{skillLabel}</span>
-                      <button 
-                        class="remove-tag" 
-                        on:click={() => handleTechnicalSkillChange(skillValue)}
-                        aria-label="Remove {skillLabel}"
-                      >
-                        <i class="fa-solid fa-xmark"></i>
-                      </button>
-                    </span>
-                  {/each}
+                  <span class="preview-tag salary-tag">
+                    <div class="tag-icon">
+                      <i class="{getSalaryIcon(data.salaryExpectation)}"></i>
+                    </div>
+                    <span class="tag-label">{getSalaryLabel(data.salaryExpectation)}</span>
+                    <button 
+                      class="remove-tag" 
+                      on:click={() => data.salaryExpectation = ''}
+                      aria-label="Remove salary preference"
+                    >
+                      <i class="fa-solid fa-xmark"></i>
+                    </button>
+                  </span>
+                </div>
+              </div>
+            {/if}
+            
+            {#if data.workMotivation}
+              <div class="preview-category">
+                <h4>Motivation</h4>
+                <div class="preview-tags">
+                  <span class="preview-tag motivation-tag">
+                    <div class="tag-icon">
+                      <i class="{getMotivationIcon(data.workMotivation)}"></i>
+                    </div>
+                    <span class="tag-label">{getMotivationLabel(data.workMotivation)}</span>
+                    <button 
+                      class="remove-tag" 
+                      on:click={() => data.workMotivation = ''}
+                      aria-label="Remove work motivation"
+                    >
+                      <i class="fa-solid fa-xmark"></i>
+                    </button>
+                  </span>
+                </div>
+              </div>
+            {/if}
+
+            {#if data.educationLevel}
+              <div class="preview-category">
+                <h4>College Year</h4>
+                <div class="preview-tags">
+                  <span class="preview-tag education-tag">
+                    <div class="tag-icon">
+                      <i class="{getEducationIcon(data.educationLevel)}"></i>
+                    </div>
+                    <span class="tag-label">{getEducationLabel(data.educationLevel)}</span>
+                    <button 
+                      class="remove-tag" 
+                      on:click={() => { data.educationLevel = ''; data.educationField = ''; }}
+                      aria-label="Remove college year"
+                    >
+                      <i class="fa-solid fa-xmark"></i>
+                    </button>
+                  </span>
+                </div>
+              </div>
+            {/if}
+
+            {#if data.educationField}
+              <div class="preview-category">
+                <h4>Major/Field of Study</h4>
+                <div class="preview-tags">
+                  <span class="preview-tag field-tag">
+                    <div class="tag-icon">
+                      <i class="{getEducationFieldIcon(data.educationField)}"></i>
+                    </div>
+                    <span class="tag-label">{data.educationField}</span>
+                    <button 
+                      class="remove-tag" 
+                      on:click={() => data.educationField = ''}
+                      aria-label="Remove education field"
+                    >
+                      <i class="fa-solid fa-xmark"></i>
+                    </button>
+                  </span>
                 </div>
               </div>
             {/if}
@@ -543,15 +602,195 @@
         </div>
       {/if}
 
-      <div class="question-card strengths-card">
+      <!-- Work Type Question -->
+      <div class="question-card work-type-card">
         <div class="question-header">
           <div class="question-title">
-            <div class="title-icon strengths-icon">
-              <i class="fa-solid fa-star"></i>
+            <div class="title-icon work-icon">
+              <i class="fa-solid fa-briefcase"></i>
             </div>
             <div class="title-content">
-              <h3>Personal Strengths</h3>
-              <span class="question-subtitle">Select up to {STRENGTH_LIMIT} that best represent you</span>
+              <h3>Work Type Interests</h3>
+              <span class="question-subtitle">Select up to {WORK_TYPE_LIMIT} that match your career goals</span>
+            </div>
+          </div>
+          <div class="question-badge">
+            <i class="fa-solid fa-star"></i>
+            <span>Essential</span>
+          </div>
+        </div>
+        
+        <!-- Search and Filter Controls -->
+        <div class="skills-controls">
+          <div class="search-box">
+            <div class="search-icon">
+              <i class="fa-solid fa-magnifying-glass"></i>
+            </div>
+            <input 
+              type="text" 
+              placeholder="Search work types..." 
+              class="skill-search" 
+              bind:value={searchQuery}
+              aria-label="Search work types"
+            />
+            {#if searchQuery}
+              <button class="clear-search" on:click={clearSearch} aria-label="Clear search">
+                <i class="fa-solid fa-xmark"></i>
+              </button>
+            {:else}
+              <div class="search-hint">
+                <i class="fa-solid fa-info-circle"></i>
+                <span>Type to filter options</span>
+              </div>
+            {/if}
+          </div>
+          
+          <div class="category-filters">
+            {#each workTypeCategories as category (category.id)}
+              <button 
+                class="category-filter {selectedCategory === category.id ? 'active' : ''}"
+                on:click={() => handleCategoryFilter(category.id)}
+                style="--filter-gradient: var(--gradient-{category.id})"
+                title="{category.name}"
+                aria-label="Show {category.name} category"
+              >
+                <div class="filter-icon">
+                  <i class="{category.icon}"></i>
+                </div>
+                <span class="filter-label">{category.name}</span>
+              </button>
+            {/each}
+          </div>
+        </div>
+        
+        <!-- Search Results -->
+        {#if searchQuery && filteredWorkTypes.length === 0}
+          <div class="no-results">
+            <div class="no-results-icon">
+              <i class="fa-solid fa-magnifying-glass"></i>
+            </div>
+            <p>No work types found for "{searchQuery}"</p>
+            <small>Try a different search term or browse all categories</small>
+            <button class="clear-search-btn" on:click={clearSearch}>
+              Clear Search
+            </button>
+          </div>
+        {/if}
+        
+        <div class="options-grid work-type-options">
+          {#each filteredWorkTypes as option (option.id)}
+            <label 
+              class="option-card work-option {isWorkTypeDisabled(option.value) ? 'disabled' : ''} {data.workTypes.includes(option.value) ? 'selected' : ''}"
+              style="--option-gradient: {option.gradient}"
+              title="{option.description}"
+            >
+              <input
+                type="checkbox"
+                value={option.value}
+                checked={data.workTypes.includes(option.value)}
+                on:change={() => handleWorkTypeChange(option.value)}
+                disabled={isWorkTypeDisabled(option.value)}
+                aria-label="{option.label} - {option.description}"
+              />
+              <div class="option-content">
+                <div class="option-icon" style="background: linear-gradient(135deg, {option.gradient.replace('from-', '').replace('to-', '').replace(' ', ', ')})">
+                  <i class="{option.icon}"></i>
+                </div>
+                <div class="option-details">
+                  <span class="option-label">{option.label}</span>
+                  <span class="option-description">{option.description}</span>
+                </div>
+                <div class="option-check">
+                  <div class="checkmark">
+                    <i class="fa-solid fa-check"></i>
+                  </div>
+                  <div class="option-badge" style="background: linear-gradient(135deg, {option.gradient.replace('from-', '').replace('to-', '').replace(' ', ', ')})">
+                    {option.category}
+                  </div>
+                </div>
+              </div>
+            </label>
+          {/each}
+        </div>
+        
+        {#if selectedWorkTypesCount > 0}
+          <div class="selection-count">
+            <div class="count-progress">
+              <div class="progress-track">
+                <div class="progress-fill" style="width: {(selectedWorkTypesCount / WORK_TYPE_LIMIT) * 100}%"></div>
+              </div>
+              <span>{selectedWorkTypesCount}/{WORK_TYPE_LIMIT} selected</span>
+            </div>
+            {#if selectedWorkTypesCount === WORK_TYPE_LIMIT}
+              <div class="limit-reached">
+                <i class="fa-solid fa-check-circle"></i>
+                <span>Maximum selections reached</span>
+              </div>
+            {/if}
+          </div>
+        {/if}
+      </div>
+
+      <!-- Salary Expectation Question -->
+      <div class="question-card salary-card">
+        <div class="question-header">
+          <div class="question-title">
+            <div class="title-icon salary-icon">
+              <i class="fa-solid fa-money-bill-wave"></i>
+            </div>
+            <div class="title-content">
+              <h3>Salary Expectations</h3>
+              <span class="question-subtitle">What range are you targeting after graduation?</span>
+            </div>
+          </div>
+        </div>
+        <div class="options-grid salary-options">
+          {#each salaryOptions as option (option.id)}
+            <label class="option-card salary-option {data.salaryExpectation === option.value ? 'selected' : ''}"
+                   style="--option-gradient: {option.gradient}">
+              <input
+                type="radio"
+                name="salary"
+                value={option.value}
+                checked={data.salaryExpectation === option.value}
+                on:change={() => handleSalaryChange(option.value)}
+                aria-label="{option.label} - {option.description}"
+              />
+              <div class="option-content">
+                <div class="option-icon" style="background: linear-gradient(135deg, {option.gradient.replace('from-', '').replace('to-', '').replace(' ', ', ')})">
+                  <i class="{option.icon}"></i>
+                </div>
+                <div class="option-details">
+                  <span class="option-label">{option.label}</span>
+                  <span class="option-description">{option.description}</span>
+                </div>
+                <div class="option-price">
+                  <span class="price-label">
+                    {#if option.id === 'entry'}
+                      $
+                    {:else if option.id === 'average'}
+                      $$
+                    {:else}
+                      $$$
+                    {/if}
+                  </span>
+                </div>
+              </div>
+            </label>
+          {/each}
+        </div>
+      </div>
+
+      <!-- Motivation Question -->
+      <div class="question-card motivation-card">
+        <div class="question-header">
+          <div class="question-title">
+            <div class="title-icon motivation-icon">
+              <i class="fa-solid fa-trophy"></i>
+            </div>
+            <div class="title-content">
+              <h3>Career Motivation</h3>
+              <span class="question-subtitle">What drives your career satisfaction?</span>
             </div>
           </div>
           <div class="question-badge">
@@ -559,20 +798,16 @@
             <span>Personal</span>
           </div>
         </div>
-        
-        <div class="options-grid strength-options">
-          {#each strengthOptions as option (option.id)}
-            <label 
-              class="option-card strength-option {isStrengthDisabled(option.value) ? 'disabled' : ''} {data.strengths.includes(option.value) ? 'selected' : ''}"
-              style="--option-gradient: {option.gradient}"
-              title="{option.description}"
-            >
-              <input
-                type="checkbox"
+        <div class="options-grid motivation-options">
+          {#each motivationOptions as option (option.id)}
+            <label class="option-card motivation-option {data.workMotivation === option.value ? 'selected' : ''}"
+                   style="--option-gradient: {option.gradient}">
+              <input 
+                type="radio" 
+                name="motivation" 
                 value={option.value}
-                checked={data.strengths.includes(option.value)}
-                on:change={() => handleStrengthChange(option.value)}
-                disabled={isStrengthDisabled(option.value)}
+                checked={data.workMotivation === option.value}
+                on:change={() => handleMotivationChange(option.value)}
                 aria-label="{option.label} - {option.description}"
               />
               <div class="option-content">
@@ -592,155 +827,101 @@
             </label>
           {/each}
         </div>
-        
-        {#if selectedStrengthsCount > 0}
-          <div class="selection-count">
-            <div class="count-progress">
-              <div class="progress-track">
-                <div class="progress-fill" style="width: {(selectedStrengthsCount / STRENGTH_LIMIT) * 100}%"></div>
-              </div>
-              <span>{selectedStrengthsCount}/{STRENGTH_LIMIT} selected</span>
-            </div>
-            {#if selectedStrengthsCount === STRENGTH_LIMIT}
-              <div class="limit-reached">
-                <i class="fa-solid fa-check-circle"></i>
-                <span>Maximum selections reached</span>
-              </div>
-            {/if}
-          </div>
-        {/if}
       </div>
 
-      <div class="question-card skills-card">
+      <!-- College Year Question -->
+      <div class="question-card education-card">
         <div class="question-header">
           <div class="question-title">
-            <div class="title-icon skills-icon">
-              <i class="fa-solid fa-wrench"></i>
+            <div class="title-icon education-icon">
+              <i class="fa-solid fa-graduation-cap"></i>
             </div>
             <div class="title-content">
-              <h3>Technical & Academic Skills</h3>
-              <span class="question-subtitle">Select up to {SKILLS_LIMIT} skills relevant to your major</span>
+              <h3>College Year</h3>
+              <span class="question-subtitle">Where are you in your academic journey?</span>
             </div>
-          </div>
-          <div class="question-badge">
-            <i class="fa-solid fa-book"></i>
-            <span>Academic</span>
           </div>
         </div>
-        
-        <div class="skills-controls">
-          <div class="search-box">
-            <div class="search-icon">
-              <i class="fa-solid fa-magnifying-glass"></i>
-            </div>
-            <input 
-              type="text" 
-              placeholder="Search skills..." 
-              class="skill-search" 
-              bind:value={searchQuery}
-              aria-label="Search skills"
-            />
-            {#if searchQuery}
-              <button class="clear-search" on:click={clearSearch} aria-label="Clear search">
-                <i class="fa-solid fa-xmark"></i>
-              </button>
-            {:else}
-              <div class="search-hint">
-                <i class="fa-solid fa-info-circle"></i>
-                <span>Type to filter skills</span>
+        <div class="options-grid education-options">
+          {#each educationOptions as option (option.id)}
+            <label class="option-card education-option {data.educationLevel === option.value ? 'selected' : ''}"
+                   style="--option-gradient: {option.gradient}">
+              <input 
+                type="radio" 
+                name="education" 
+                value={option.value}
+                checked={data.educationLevel === option.value}
+                on:change={() => handleEducationLevelChange(option.value)}
+                aria-label="{option.label} - {getEducationDescription(option.value)}"
+              />
+              <div class="option-content">
+                <div class="option-icon" style="background: linear-gradient(135deg, {option.gradient.replace('from-', '').replace('to-', '').replace(' ', ', ')})">
+                  <i class="{option.icon}"></i>
+                </div>
+                <div class="option-details">
+                  <span class="option-label">{option.label}</span>
+                  <span class="option-description">{getEducationDescription(option.value)}</span>
+                </div>
+                <div class="option-year">
+                  <span class="year-badge">
+                    {#if option.id === 'first'}
+                      1st
+                    {:else if option.id === 'second'}
+                      2nd
+                    {:else if option.id === 'third'}
+                      3rd
+                    {:else}
+                      4th
+                    {/if}
+                  </span>
+                </div>
               </div>
-            {/if}
-          </div>
-          
-          <div class="category-filters">
-            {#each skillCategories as category (category.id)}
-              <button 
-                class="category-filter {selectedCategory === category.id ? 'active' : ''}"
-                on:click={() => handleCategoryFilter(category.id)}
-                style="--filter-gradient: {category.gradient}"
-                title="{category.name}"
-                aria-label="Show {category.name} category"
-              >
-                <div class="filter-icon">
-                  <i class="{category.icon}"></i>
-                </div>
-                <span class="filter-label">{category.name}</span>
-              </button>
-            {/each}
-          </div>
-        </div>
-        
-        {#if searchQuery && filteredSkills.length === 0}
-          <div class="no-results">
-            <div class="no-results-icon">
-              <i class="fa-solid fa-magnifying-glass"></i>
-            </div>
-            <p>No skills found for "{searchQuery}"</p>
-            <small>Try a different search term or browse all categories</small>
-            <button class="clear-search-btn" on:click={clearSearch}>
-              Clear Search
-            </button>
-          </div>
-        {/if}
-        
-        <div class="options-grid skill-options">
-          {#each filteredSkills as skill (skill.id)}
-            {#key skill.value}
-              {@const category = getSkillCategory(skill.value)}
-              <label 
-                class="option-card skill-option {isTechnicalSkillDisabled(skill.value) ? 'disabled' : ''} {data.technicalSkills.includes(skill.value) ? 'selected' : ''}"
-                style="--option-gradient: {category?.gradient}"
-              >
-                <input
-                  type="checkbox"
-                  value={skill.value}
-                  checked={data.technicalSkills.includes(skill.value)}
-                  on:change={() => handleTechnicalSkillChange(skill.value)}
-                  disabled={isTechnicalSkillDisabled(skill.value)}
-                  aria-label="{skill.label}"
-                />
-                <div class="option-content">
-                  <div class="option-icon" style="background: linear-gradient(135deg, {category?.gradient?.replace('from-', '').replace('to-', '').replace(' ', ', ')})">
-                    <i class="{category?.icon}"></i>
-                  </div>
-                  <div class="option-details">
-                    <span class="option-label">{skill.label}</span>
-                    <span class="option-description">{category?.name}</span>
-                  </div>
-                  <div class="option-check">
-                    <div class="checkmark">
-                      <i class="fa-solid fa-check"></i>
-                    </div>
-                  </div>
-                </div>
-              </label>
-            {/key}
+            </label>
           {/each}
         </div>
-        
-        {#if selectedSkillsCount > 0}
-          <div class="selection-count">
-            <div class="count-progress">
-              <div class="progress-track">
-                <div class="progress-fill" style="width: {(selectedSkillsCount / SKILLS_LIMIT) * 100}%"></div>
-              </div>
-              <span>{selectedSkillsCount}/{SKILLS_LIMIT} selected</span>
+      </div>
+
+      <!-- Education Field Question -->
+      <div class="question-card field-card">
+        <div class="question-header">
+          <div class="question-title">
+            <div class="title-icon field-icon">
+              <i class="fa-solid fa-book-open"></i>
             </div>
-            {#if selectedSkillsCount === SKILLS_LIMIT}
-              <div class="limit-reached">
-                <i class="fa-solid fa-check-circle"></i>
-                <span>Maximum selections reached</span>
-              </div>
-            {/if}
+            <div class="title-content">
+              <h3>Major/Field of Study</h3>
+              <span class="question-subtitle">Select your primary academic focus</span>
+            </div>
           </div>
-        {/if}
+        </div>
+        <div class="options-grid education-field-options">
+          {#each educationFieldOptions as option (option.id)}
+            <label class="option-pill field-option {data.educationField === option.value ? 'selected' : ''}"
+                   style="--option-gradient: {option.gradient}">
+              <input 
+                type="radio" 
+                name="educationField" 
+                value={option.value}
+                checked={data.educationField === option.value}
+                on:change={() => handleEducationFieldChange(option.value)}
+                aria-label="{option.label}"
+              />
+              <div class="option-content">
+                <div class="pill-icon" style="background: linear-gradient(135deg, {option.gradient.replace('from-', '').replace('to-', '').replace(' ', ', ')})">
+                  <i class="{option.icon}"></i>
+                </div>
+                <span class="pill-label">{option.label}</span>
+              </div>
+            </label>
+          {/each}
+        </div>
       </div>
 
       <!-- Navigation Buttons -->
       <div class="navigation-buttons">
         <button class="nav-button back-button" type="button" on:click={goBack}>
           <i class="fa-solid fa-chevron-left"></i>
-          <span>Back to Preferences</span>
+          <span>Back to Home</span>
         </button>
         
         <div class="completion-status">
@@ -751,8 +932,7 @@
               </div>
               <div class="status-text">
                 <span class="status-title">Ready to Continue</span>
-                <!-- FIXED: Shows 2/2 when complete -->
-                <span class="status-subtitle">2/2 sections completed</span>
+                <span class="status-subtitle">5/5 sections completed</span>
               </div>
             {:else}
               <div class="status-icon incomplete">
@@ -760,8 +940,7 @@
               </div>
               <div class="status-text">
                 <span class="status-title">Complete All Sections</span>
-                <!-- FIXED: Shows actual completion count -->
-                <span class="status-subtitle">{completionCount}/2 sections done</span>
+                <span class="status-subtitle">{completionCount}/5 sections done</span>
               </div>
             {/if}
           </div>
@@ -770,14 +949,14 @@
         <button 
           class="nav-button next-button {isFormComplete ? 'glow' : ''}" 
           type="button" 
-          on:click={goNext}
+          on:click={nextQuestion}
           disabled={!isFormComplete || isLoading}
         >
           {#if isLoading}
             <div class="button-loader"></div>
-            <span>Processing...</span>
+            <span>Continue to Skills</span>
           {:else}
-            <span>Continue to Work</span>
+            <span>Continue to Skills</span>
             <i class="fa-solid fa-chevron-right"></i>
           {/if}
         </button>
@@ -791,6 +970,7 @@
   @import url('https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css');
 
   :global(:root) {
+    /* Modern gradient variables */
     --gradient-primary: linear-gradient(135deg, #6366f1 0%, #818cf8 100%);
     --gradient-secondary: linear-gradient(135deg, #f59e0b 0%, #fbbf24 100%);
     --gradient-accent: linear-gradient(135deg, #ec4899 0%, #f472b6 100%);
@@ -798,17 +978,17 @@
     --gradient-warning: linear-gradient(135deg, #f59e0b 0%, #fbbf24 100%);
     --gradient-error: linear-gradient(135deg, #ef4444 0%, #f87171 100%);
     
-    --gradient-leadership: linear-gradient(135deg, #8b5cf6 0%, #a78bfa 100%);
-    --gradient-teamwork: linear-gradient(135deg, #10b981 0%, #34d399 100%);
-    --gradient-creativity: linear-gradient(135deg, #ec4899 0%, #f472b6 100%);
-    --gradient-problem-solving: linear-gradient(135deg, #3b82f6 0%, #60a5fa 100%);
-    --gradient-adaptability: linear-gradient(135deg, #f59e0b 0%, #fbbf24 100%);
-    --gradient-communication: linear-gradient(135deg, #0ea5e9 0%, #38bdf8 100%);
-    --gradient-time-management: linear-gradient(135deg, #8b5cf6 0%, #a78bfa 100%);
-    --gradient-critical-thinking: linear-gradient(135deg, #4f46e5 0%, #6366f1 100%);
+    /* Category gradients */
+    --gradient-creative: linear-gradient(135deg, #ec4899 0%, #f472b6 100%);
+    --gradient-technical: linear-gradient(135deg, #6366f1 0%, #818cf8 100%);
+    --gradient-business: linear-gradient(135deg, #f59e0b 0%, #fbbf24 100%);
+    --gradient-social: linear-gradient(135deg, #10b981 0%, #34d399 100%);
+    --gradient-scientific: linear-gradient(135deg, #ef4444 0%, #f87171 100%);
+    --gradient-organizational: linear-gradient(135deg, #64748b 0%, #94a3b8 100%);
+    --gradient-all: linear-gradient(135deg, #6b7280 0%, #9ca3af 100%);
   }
 
-  .skills-page {
+  .preferences-page {
     min-height: 100vh;
     padding: 0;
     background: linear-gradient(135deg, #0f172a 0%, #1e293b 100%);
@@ -818,6 +998,7 @@
     overflow-x: hidden;
   }
 
+  /* Background Elements */
   .background-elements {
     position: fixed;
     top: 0;
@@ -882,6 +1063,7 @@
     }
   }
 
+  /* Toast Styles */
   .toast {
     position: fixed;
     top: 2rem;
@@ -957,7 +1139,7 @@
     }
   }
 
-  .skills-header {
+  .preferences-header {
     position: relative;
     z-index: 2;
     background: rgba(15, 23, 42, 0.8);
@@ -993,7 +1175,7 @@
     filter: drop-shadow(0 4px 20px rgba(99, 102, 241, 0.3));
   }
 
-  .skills-header h1 {
+  .preferences-header h1 {
     font-size: 2.5rem;
     font-weight: 700;
     background: linear-gradient(135deg, #f8fafc, #cbd5e1);
@@ -1013,6 +1195,7 @@
     line-height: 1.6;
   }
 
+  /* Full width container for the form */
   .full-width-container {
     width: 100%;
     max-width: 100%;
@@ -1021,7 +1204,7 @@
     z-index: 2;
   }
 
-  .skills-content {
+  .preferences-content {
     width: 100%;
     max-width: 1400px;
     margin: 0 auto;
@@ -1036,6 +1219,7 @@
     margin-bottom: 3rem;
   }
 
+  /* Progress Section */
   .progress-container {
     margin-bottom: 3rem;
   }
@@ -1125,6 +1309,7 @@
     margin-top: 0.5rem;
   }
 
+  /* Content Header */
   .content-header {
     display: flex;
     align-items: center;
@@ -1172,6 +1357,7 @@
     font-size: 1.25rem;
   }
 
+  /* Selection Preview */
   .selection-preview {
     background: rgba(255, 255, 255, 0.05);
     border-radius: 1.5rem;
@@ -1321,14 +1507,29 @@
     font-size: 1rem;
   }
 
-  .preview-tag:not(.skill-tag) .tag-icon {
+  .preview-tag:not(.salary-tag):not(.motivation-tag):not(.education-tag):not(.field-tag) .tag-icon {
     background: var(--tag-gradient, var(--gradient-primary));
     color: white;
   }
 
-  .skill-tag .tag-icon {
+  .salary-tag .tag-icon {
     background: linear-gradient(135deg, #6366f1, #818cf8);
     color: white;
+  }
+
+  .motivation-tag .tag-icon {
+    background: linear-gradient(135deg, #10b981, #34d399);
+    color: white;
+  }
+
+  .education-tag .tag-icon {
+    background: linear-gradient(135deg, #8b5cf6, #a78bfa);
+    color: white;
+  }
+
+  .field-tag .tag-icon {
+    background: linear-gradient(135deg, #f59e0b, #fbbf24);
+    color: #1e293b;
   }
 
   .tag-label {
@@ -1355,6 +1556,7 @@
     color: #f87171;
   }
 
+  /* Question Cards */
   .question-card {
     background: rgba(255, 255, 255, 0.03);
     border-radius: 1.5rem;
@@ -1410,16 +1612,34 @@
     flex-shrink: 0;
   }
 
-  .strengths-icon {
+  .work-icon {
+    background: linear-gradient(135deg, rgba(99, 102, 241, 0.2), rgba(129, 140, 248, 0.1));
+    border: 1px solid rgba(99, 102, 241, 0.3);
+    color: #818cf8;
+  }
+
+  .salary-icon {
     background: linear-gradient(135deg, rgba(245, 158, 11, 0.2), rgba(251, 191, 36, 0.1));
     border: 1px solid rgba(245, 158, 11, 0.3);
     color: #fbbf24;
   }
 
-  .skills-icon {
-    background: linear-gradient(135deg, rgba(99, 102, 241, 0.2), rgba(129, 140, 248, 0.1));
-    border: 1px solid rgba(99, 102, 241, 0.3);
-    color: #818cf8;
+  .motivation-icon {
+    background: linear-gradient(135deg, rgba(16, 185, 129, 0.2), rgba(52, 211, 153, 0.1));
+    border: 1px solid rgba(16, 185, 129, 0.3);
+    color: #34d399;
+  }
+
+  .education-icon {
+    background: linear-gradient(135deg, rgba(139, 92, 246, 0.2), rgba(167, 139, 250, 0.1));
+    border: 1px solid rgba(139, 92, 246, 0.3);
+    color: #a78bfa;
+  }
+
+  .field-icon {
+    background: linear-gradient(135deg, rgba(245, 158, 11, 0.2), rgba(251, 191, 36, 0.1));
+    border: 1px solid rgba(245, 158, 11, 0.3);
+    color: #fbbf24;
   }
 
   .title-content h3 {
@@ -1454,6 +1674,7 @@
     color: #f59e0b;
   }
 
+  /* Skills Controls */
   .skills-controls {
     display: flex;
     flex-direction: column;
@@ -1574,12 +1795,14 @@
     font-size: 1rem;
   }
 
+  /* Options Grid */
   .options-grid {
     display: grid;
     grid-template-columns: repeat(auto-fill, minmax(320px, 1fr));
     gap: 1.25rem;
   }
 
+  /* Option Cards */
   .option-card {
     position: relative;
     background: rgba(255, 255, 255, 0.03);
@@ -1703,6 +1926,94 @@
     transform: scale(1);
   }
 
+  .option-badge {
+    font-size: 0.75rem;
+    padding: 0.25rem 0.75rem;
+    border-radius: 1rem;
+    color: white;
+    font-weight: 500;
+    text-transform: capitalize;
+  }
+
+  .option-price .price-label {
+    font-size: 1.75rem;
+    font-weight: 700;
+    color: #fbbf24;
+    font-family: 'Poppins', sans-serif;
+  }
+
+  .option-year .year-badge {
+    font-size: 1.125rem;
+    font-weight: 600;
+    color: #a78bfa;
+    background: rgba(167, 139, 250, 0.1);
+    padding: 0.5rem 1rem;
+    border-radius: 1rem;
+  }
+
+  /* Option Pills */
+  .option-pill {
+    position: relative;
+    background: rgba(255, 255, 255, 0.03);
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    border-radius: 2rem;
+    padding: 0;
+    transition: all 0.3s ease;
+    cursor: pointer;
+    text-align: center;
+  }
+
+  .option-pill:hover {
+    background: rgba(255, 255, 255, 0.05);
+    border-color: rgba(255, 255, 255, 0.2);
+    transform: translateY(-1px);
+  }
+
+  .option-pill.selected {
+    background: rgba(255, 255, 255, 0.08);
+    border-color: transparent;
+    box-shadow: 
+      0 5px 20px rgba(0, 0, 0, 0.2),
+      0 0 10px rgba(99, 102, 241, 0.1);
+  }
+
+  .option-pill input {
+    position: absolute;
+    opacity: 0;
+    cursor: pointer;
+  }
+
+  .option-pill .option-content {
+    display: flex;
+    flex-direction: column;
+    padding: 2rem 1rem;
+    gap: 1rem;
+  }
+
+  .pill-icon {
+    width: 56px;
+    height: 56px;
+    border-radius: 50%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 1.5rem;
+    color: white;
+    margin: 0 auto;
+    background: linear-gradient(135deg, var(--option-gradient-colors));
+  }
+
+  .pill-label {
+    font-size: 0.95rem;
+    color: #f8fafc;
+    font-weight: 500;
+  }
+
+  .option-pill.selected .pill-label {
+    font-weight: 600;
+  }
+
+  /* No results message */
   .no-results {
     text-align: center;
     padding: 4rem 2rem;
@@ -1750,6 +2061,7 @@
     box-shadow: 0 4px 20px rgba(99, 102, 241, 0.3);
   }
 
+  /* Selection Count */
   .selection-count {
     display: flex;
     align-items: center;
@@ -1795,6 +2107,7 @@
     font-weight: 500;
   }
 
+  /* Navigation Buttons */
   .navigation-buttons {
     display: flex;
     align-items: center;
@@ -1939,8 +2252,9 @@
     to { transform: rotate(360deg); }
   }
 
+  /* Responsive Design */
   @media (max-width: 1400px) {
-    .skills-content {
+    .preferences-content {
       max-width: 1200px;
       padding: 2.5rem;
     }
@@ -1957,7 +2271,7 @@
   }
 
   @media (max-width: 1024px) {
-    .skills-content {
+    .preferences-content {
       max-width: 1000px;
       padding: 2rem;
     }
@@ -1995,7 +2309,7 @@
   }
 
   @media (max-width: 768px) {
-    .skills-page {
+    .preferences-page {
       padding: 0;
     }
 
@@ -2006,11 +2320,11 @@
       max-width: none;
     }
 
-    .skills-header {
+    .preferences-header {
       padding: 2rem 1rem;
     }
 
-    .skills-header h1 {
+    .preferences-header h1 {
       font-size: 2rem;
     }
 
@@ -2018,7 +2332,7 @@
       font-size: 1rem;
     }
 
-    .skills-content {
+    .preferences-content {
       padding: 1.75rem;
       margin: 0 0.5rem;
       border-radius: 1.5rem;
@@ -2105,7 +2419,7 @@
   }
 
   @media (max-width: 480px) {
-    .skills-content {
+    .preferences-content {
       padding: 1.5rem;
     }
 

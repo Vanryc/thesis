@@ -1,793 +1,1435 @@
+<!-- Results.svelte -->
 <script lang="ts">
-  import { createEventDispatcher } from 'svelte';
+  import { onMount } from 'svelte';
   import { fade } from 'svelte/transition';
-  const dispatch = createEventDispatcher();
-
+  import { supabase } from '../lib/supabase';
+  import { saveAssessment } from '../lib/assessmentUtils';
+  import { createEventDispatcher } from 'svelte';
+  
+  // Types matching backend
   interface CareerMatch {
     title: string;
-    company?: string;
-    location?: string;
     matchPercentage: number;
     strengths: string[];
     growthOpportunity?: string;
     salary?: string;
-    url?: string;
     industry?: string;
     responsibilities?: string;
     requiredSkills?: string[];
     matchReason?: string;
+    icon?: string;
+    gradient?: string;
+    educationRequired?: string;
+    experienceLevel?: string;
+    skillsToDevelop?: string[];
+    certificationPaths?: string[];
+    localCompanies?: string[];
   }
 
   interface AlternatePath {
     title: string;
     matchPercentage: number;
     description?: string;
+    icon?: string;
+    gradient?: string;
   }
 
-  interface ResultsData {
-    topMatches: CareerMatch[];
-    alternatePaths: AlternatePath[];
-    jobLinks: string[];
+  interface SummaryData {
+    topMatch: number;
+    averageMatch: number;
+    totalRecommendations: number;
+    suggestedNextSteps: string[];
+    timelineSuggestions: string[];
   }
+
+  type ToastType = 'success' | 'warning' | 'info' | 'error';
+
+  // Modern color palette
+  const colors = {
+    primary: '#6366f1',
+    primaryLight: '#818cf8',
+    primaryDark: '#4f46e5',
+    secondary: '#f59e0b',
+    secondaryLight: '#fbbf24',
+    accent: '#ec4899',
+    accentLight: '#f472b6',
+    success: '#10b981',
+    warning: '#f59e0b',
+    error: '#ef4444',
+    background: '#0f172a',
+    surface: '#1e293b',
+    surfaceLight: '#334155',
+    text: '#f8fafc',
+    textSecondary: '#cbd5e1',
+    textMuted: '#94a3b8'
+  };
 
   export let recommendations: CareerMatch[] = [];
   export let alternatePaths: AlternatePath[] = [];
   export let jobLinks: string[] = [];
+  export let summaryData: SummaryData | null = null;
+  export let userName = '';
 
-  let isSaving = false;
-  let showDetails: boolean[] = [];
-  let showConfirmation = false;
+  // Create event dispatcher
+  const dispatch = createEventDispatcher();
 
-  // Function to generate job links that match the specific career recommendations
-  function generateMatchingJobLinks(recommendations: CareerMatch[]): string[] {
-    return recommendations.map((job, index) => {
-      const cleanTitle = job.title
-        .replace(/[^\w\s]/g, '')
-        .replace(/\s+/g, ' ')
-        .trim();
-      
-      const encodedTitle = encodeURIComponent(cleanTitle);
-      const location = encodeURIComponent('Philippines');
-      
-      // Alternate between LinkedIn and Indeed for each job
-      if (index % 2 === 0) {
-        // LinkedIn
-        return `https://www.linkedin.com/jobs/search/?keywords=${encodedTitle}&location=${location}&geoId=103121230&f_TPR=r86400`;
-      } else {
-        // Indeed
-        return `https://ph.indeed.com/jobs?q=${encodedTitle}&l=Philippines&fromage=7`;
-      }
-    });
-  }
+  // Reactive state
+  let isLoading = false;
+  let activeToast: { message: string; type: ToastType } | null = null;
+  let expandedDetails: boolean[] = [];
 
-  // Function to extract and calculate salary values
-  function calculateSalaries(salaryString: string | undefined) {
-    if (!salaryString) return null;
-    
-    // Extract numbers from salary string (handles formats like "$50,000 - $70,000" or "50K-70K")
-    const numbers = salaryString.match(/\d+/g);
-    if (!numbers || numbers.length < 2) return null;
-    
-    const min = parseInt(numbers[0]);
-    const max = parseInt(numbers[1]);
-    
-    // Check if salary is in thousands (e.g., 50K-70K)
-    const isInThousands = salaryString.toLowerCase().includes('k') || 
-                         (min < 100 && max < 100);
-    
-    const annualMin = isInThousands ? min * 1000 : min;
-    const annualMax = isInThousands ? max * 1000 : max;
-    
-    const monthlyMin = Math.round(annualMin / 12);
-    const monthlyMax = Math.round(annualMax / 12);
-    
-    return {
-      annual: `$${annualMin.toLocaleString()} - $${annualMax.toLocaleString()}`,
-      monthly: `$${monthlyMin.toLocaleString()} - $${monthlyMax.toLocaleString()}`
-    };
-  }
-
-  $: results = {
-    topMatches: recommendations.slice(0, 3) || [],
-    alternatePaths: alternatePaths.length > 0 ? alternatePaths : recommendations.slice(3).map(job => ({
-      title: job.title,
-      matchPercentage: job.matchPercentage,
-      description: job.industry ? `Industry: ${job.industry}` : ''
-    })) || [
-      { 
-        title: "Similar Role", 
-        matchPercentage: 75,
-        description: "Roles with similar skill requirements but different focus areas"
-      },
-      { 
-        title: "Related Field", 
-        matchPercentage: 65,
-        description: "Fields that leverage transferable skills from your background"
-      }
+  // Default summary data if none provided
+  const defaultSummaryData: SummaryData = {
+    topMatch: 0,
+    averageMatch: 0,
+    totalRecommendations: 0,
+    suggestedNextSteps: [
+      'Update your resume with relevant skills',
+      'Network with professionals in your field',
+      'Consider relevant certifications'
     ],
-    // Use jobLinks from server if available, otherwise generate matching links
-    jobLinks: jobLinks.length > 0 ? jobLinks : generateMatchingJobLinks(recommendations.slice(0, 3))
+    timelineSuggestions: [
+      'Focus on developing relevant skills (1-3 months)',
+      'Build a professional network (3-6 months)',
+      'Gain practical experience (6-12 months)'
+    ]
   };
 
-  function handleStartOver() {
-    showConfirmation = true;
+  // Safe getter for summary data
+  const getSummaryData = (): SummaryData => {
+    return summaryData || defaultSummaryData;
+  };
+
+  // Default icons for career types
+  const careerIcons: Record<string, string> = {
+    'Developer': 'fa-solid fa-code',
+    'Analyst': 'fa-solid fa-chart-line',
+    'Designer': 'fa-solid fa-paintbrush',
+    'Manager': 'fa-solid fa-users',
+    'Engineer': 'fa-solid fa-gears',
+    'Specialist': 'fa-solid fa-user-tie',
+    'Coordinator': 'fa-solid fa-calendar-check',
+    'Assistant': 'fa-solid fa-headset',
+    'Technician': 'fa-solid fa-wrench',
+    'Default': 'fa-solid fa-briefcase'
+  };
+
+  // Default gradients for career types
+  const careerGradients: Record<string, string> = {
+    'technology': 'from-purple-500 to-indigo-500',
+    'business': 'from-blue-500 to-cyan-500',
+    'healthcare': 'from-rose-500 to-pink-500',
+    'creative': 'from-pink-500 to-rose-500',
+    'education': 'from-yellow-500 to-amber-500',
+    'engineering': 'from-violet-500 to-purple-500',
+    'default': 'from-slate-500 to-gray-500'
+  };
+
+  // Calculate summary statistics from data
+  $: topMatchScore = recommendations.length > 0 ? recommendations[0].matchPercentage : 0;
+  $: averageMatchScore = getSummaryData().averageMatch || (recommendations.length > 0 
+    ? Math.round(recommendations.reduce((sum, job) => sum + job.matchPercentage, 0) / recommendations.length)
+    : 0);
+  $: totalRecommendations = (recommendations.length || 0) + (alternatePaths.length || 0);
+
+  // Initialize expanded details array
+  $: if (recommendations.length > 0 && expandedDetails.length === 0) {
+    expandedDetails = new Array(recommendations.length).fill(false);
   }
 
-  function confirmStartOver() {
-    showConfirmation = false;
-    dispatch('restart');
-  }
-
-  function cancelStartOver() {
-    showConfirmation = false;
-  }
-
-  function copyLink(link: string) {
-    navigator.clipboard.writeText(link);
-  }
-
-  async function saveAsPDF() {
-    isSaving = true;
-    try {
-      // Create a print stylesheet
-      const style = document.createElement('style');
-      style.innerHTML = `
-        @media print {
-          body * {
-            visibility: hidden;
-          }
-          .results-container, .results-container * {
-            visibility: visible;
-          }
-          .results-container {
-            position: absolute;
-            left: 0;
-            top: 0;
-            width: 100%;
-            margin: 0;
-            padding: 20px;
-            box-shadow: none;
-            background: white;
-          }
-          .action-buttons, .details-btn, .copy {
-            display: none !important;
-          }
-          /* Expand all details sections for printing */
-          .details-section {
-            display: block !important;
-          }
-          /* Hide empty elements */
-          .empty-state {
-            display: none !important;
-          }
-        }
-      `;
-      document.head.appendChild(style);
-
-      // Create a report header
-      const reportHeader = document.createElement('div');
-      reportHeader.className = 'report-header';
-      reportHeader.innerHTML = `
-        <h1 style="text-align: center; margin-bottom: 5px; color: #1f2937;">Career Match Results Report</h1>
-        <p style="text-align: center; color: #6b7280; margin-bottom: 30px;">Generated on ${new Date().toLocaleDateString()}</p>
-      `;
-      
-      // Find the results container
-      const resultsContainer = document.querySelector('.results-container');
-      if (!resultsContainer) {
-        throw new Error("Results container not found.");
-      }
-      const resultsContainerEl = resultsContainer as HTMLElement;
-      
-      // Clone the container to avoid modifying the original
-      const clone = resultsContainerEl.cloneNode(true) as HTMLElement;
-      
-      // Remove action buttons from the clone
-      const actionButtons = clone.querySelector('.action-buttons');
-      if (actionButtons) actionButtons.remove();
-      
-      // Remove progress bar from the clone
-      const progressBar = clone.querySelector('.progress-bar');
-      if (progressBar) progressBar.remove();
-      
-      // Insert the header
-      clone.insertBefore(reportHeader, clone.firstChild);
-      
-      // Create a temporary container for printing
-      const printContainer = document.createElement('div');
-      printContainer.className = 'print-only';
-      printContainer.appendChild(clone);
-      
-      // Hide the original content
-      resultsContainerEl.style.visibility = 'hidden';
-      
-      // Add the print container to the body
-      document.body.appendChild(printContainer);
-      
-      // Print the page
-      window.print();
-      
-      // Clean up
-      setTimeout(() => {
-        document.head.removeChild(style);
-        printContainer.remove();
-        (resultsContainer as HTMLElement).style.visibility = 'visible';
-        isSaving = false;
-      }, 1000);
-    } catch (error) {
-      console.error("PDF generation failed:", error);
-      alert("Failed to generate PDF. Please try printing the page manually.");
-      isSaving = false;
+  // Lifecycle
+  onMount(() => {
+    console.log('Results component mounted with data:', {
+      recommendationsCount: recommendations.length,
+      alternatePathsCount: alternatePaths.length,
+      jobLinksCount: jobLinks.length,
+      summaryData: summaryData
+    });
+    
+    if (recommendations.length > 0) {
+      showToast(`Found ${recommendations.length} perfect career matches for you!`, 'success');
     }
-  }
+  });
 
-  function toggleDetails(index: number) {
-    showDetails[index] = !showDetails[index];
-    // Force Svelte to recognize the change
-    showDetails = [...showDetails];
-  }
+  // Helper functions
+  const getMatchGradient = (percentage: number) => {
+    if (percentage >= 90) return 'from-green-500 to-emerald-500';
+    if (percentage >= 80) return 'from-blue-500 to-cyan-500';
+    if (percentage >= 70) return 'from-purple-500 to-indigo-500';
+    if (percentage >= 60) return 'from-amber-500 to-orange-500';
+    return 'from-slate-500 to-gray-500';
+  };
 
-  // Function to get the platform name from URL
-  function getPlatformName(url: string): string {
-    if (url.includes('linkedin.com')) return 'LinkedIn Jobs';
-    if (url.includes('indeed.com')) return 'Indeed Jobs';
+  const getMatchColor = (percentage: number) => {
+    if (percentage >= 90) return '#10b981';
+    if (percentage >= 80) return '#3b82f6';
+    if (percentage >= 70) return '#8b5cf6';
+    if (percentage >= 60) return '#f59e0b';
+    return '#64748b';
+  };
+
+  const getCareerIcon = (title: string, industry?: string) => {
+    const titleLower = title.toLowerCase();
+    if (titleLower.includes('developer') || titleLower.includes('programmer') || titleLower.includes('engineer')) 
+      return careerIcons['Developer'];
+    if (titleLower.includes('analyst') || titleLower.includes('data')) 
+      return careerIcons['Analyst'];
+    if (titleLower.includes('designer') || titleLower.includes('creative')) 
+      return careerIcons['Designer'];
+    if (titleLower.includes('manager') || titleLower.includes('director')) 
+      return careerIcons['Manager'];
+    if (titleLower.includes('engineer') || titleLower.includes('technician')) 
+      return careerIcons['Engineer'];
+    if (titleLower.includes('specialist') || titleLower.includes('expert')) 
+      return careerIcons['Specialist'];
+    if (titleLower.includes('coordinator') || titleLower.includes('planner')) 
+      return careerIcons['Coordinator'];
+    if (titleLower.includes('assistant') || titleLower.includes('support')) 
+      return careerIcons['Assistant'];
+    
+    if (industry) {
+      const industryLower = industry.toLowerCase();
+      if (industryLower.includes('tech')) return careerIcons['Developer'];
+      if (industryLower.includes('business')) return careerIcons['Manager'];
+      if (industryLower.includes('health')) return careerIcons['Specialist'];
+      if (industryLower.includes('creative')) return careerIcons['Designer'];
+    }
+    
+    return careerIcons['Default'];
+  };
+
+  const getCareerGradient = (industry?: string) => {
+    if (!industry) return careerGradients['default'];
+    
+    const industryLower = industry.toLowerCase();
+    if (industryLower.includes('tech')) return careerGradients['technology'];
+    if (industryLower.includes('business')) return careerGradients['business'];
+    if (industryLower.includes('health')) return careerGradients['healthcare'];
+    if (industryLower.includes('creative') || industryLower.includes('design')) 
+      return careerGradients['creative'];
+    if (industryLower.includes('education') || industryLower.includes('training')) 
+      return careerGradients['education'];
+    if (industryLower.includes('engineer') || industryLower.includes('technical')) 
+      return careerGradients['engineering'];
+    
+    return careerGradients['default'];
+  };
+
+  // Toast system
+  const showToast = (message: string, type: ToastType = 'info') => {
+    if (activeToast?.message === message) return;
+    
+    activeToast = { message, type };
+    
+    setTimeout(() => {
+      activeToast = null;
+    }, 3000);
+  };
+
+  // Toggle details
+  const toggleDetails = (index: number) => {
+    expandedDetails[index] = !expandedDetails[index];
+    expandedDetails = [...expandedDetails];
+  };
+
+  // Platform name from URL
+  const getPlatformName = (url: string) => {
+    if (url.includes('linkedin.com')) return 'LinkedIn';
+    if (url.includes('indeed.com')) return 'Indeed';
     if (url.includes('jobstreet.com')) return 'JobStreet';
     if (url.includes('kalibrr.com')) return 'Kalibrr';
-    if (url.includes('monster.com')) return 'Monster Jobs';
     return 'Job Search';
-  }
+  };
+
+  // Save results and navigate to dashboard - FIXED VERSION
+  const handleContinueToDashboard = async () => {
+    try {
+      isLoading = true;
+      
+      // Get current user
+      const { data: { user } } = await supabase.auth.getUser();
+      if (!user) {
+        showToast('Please log in to save your results', 'warning');
+        // Dispatch event to navigate to login
+        dispatch('navigateToLogin');
+        return;
+      }
+
+      // Prepare assessment data
+      const assessmentData = {
+        match_score: topMatchScore,
+        top_careers: recommendations,
+        full_results: {
+          recommendations: recommendations,
+          alternatePaths: alternatePaths,
+          jobLinks: jobLinks,
+          summaryData: getSummaryData(),
+          userName: userName || 'User'
+        }
+      };
+      
+      console.log('Saving assessment data:', assessmentData);
+
+      // Save assessment to database
+      const result = await saveAssessment(supabase, user.id, assessmentData, userName);
+      
+      if (!result.success) {
+        showToast('Failed to save assessment results. Please try again.', 'warning');
+        isLoading = false;
+        return;
+      }
+
+      // Store results in localStorage for immediate access
+      localStorage.setItem('latestAssessment', JSON.stringify({
+        ...assessmentData,
+        id: result.assessmentId || 'local-' + Date.now(),
+        created_at: new Date().toISOString(),
+        date: new Date().toISOString().split('T')[0],
+        time: new Date().toLocaleTimeString(),
+        user_id: user.id
+      }));
+
+      showToast('Assessment results saved successfully!', 'success');
+
+      // Dispatch custom event to parent to navigate to dashboard
+      setTimeout(() => {
+        dispatch('navigateToDashboard');
+      }, 1000);
+
+    } catch (error: any) {
+      console.error('Error saving assessment:', error);
+      showToast('Failed to save assessment. Please try again.', 'error');
+    } finally {
+      isLoading = false;
+    }
+  };
+
+  // Copy link
+  const copyLink = (link: string) => {
+    navigator.clipboard.writeText(link);
+    showToast('Link copied to clipboard', 'success');
+  };
+
+  // Format salary display
+  const formatSalary = (salary?: string) => {
+    if (!salary) return 'Competitive salary';
+    return salary;
+  };
+
+  // Start new assessment
+  const startNewAssessment = () => {
+    dispatch('navigateToHome');
+  };
 </script>
 
-<div class="results-container">
-  <div class="progress-bar">
-    <div class="progress-complete" style="width: 100%"></div>
+<div class="results-page">
+  <!-- Toast Notification -->
+  {#if activeToast}
+    <div class="toast toast--{activeToast.type}" transition:fade>
+      <div class="toast-icon">
+        {#if activeToast.type === 'success'}
+          <div class="icon-wrapper success">
+            <i class="fa-solid fa-check-circle"></i>
+          </div>
+        {:else if activeToast.type === 'warning'}
+          <div class="icon-wrapper warning">
+            <i class="fa-solid fa-exclamation-circle"></i>
+          </div>
+        {:else if activeToast.type === 'error'}
+          <div class="icon-wrapper error">
+            <i class="fa-solid fa-exclamation-triangle"></i>
+          </div>
+        {:else}
+          <div class="icon-wrapper info">
+            <i class="fa-solid fa-info-circle"></i>
+          </div>
+        {/if}
+      </div>
+      <span class="toast-message">{activeToast.message}</span>
+      <button class="toast-close" on:click={() => activeToast = null} aria-label="Dismiss notification">
+        <i class="fa-solid fa-xmark"></i>
+      </button>
+    </div>
+  {/if}
+
+  <!-- Background Elements -->
+  <div class="background-elements">
+    <div class="bg-gradient"></div>
+    <div class="bg-particle"></div>
+    <div class="bg-particle"></div>
+    <div class="bg-particle"></div>
   </div>
 
   <div class="results-header">
-    <h1>Your Career Match Results</h1>
-    <p class="subtitle">We've analyzed your skills and preferences to find the best career matches</p>
-    <div class="match-summary">
-      <div class="summary-card">
-        <div class="summary-value">{recommendations.length > 0 ? recommendations[0].matchPercentage : '0'}%</div>
-        <div class="summary-label">Top Match</div>
+    <div class="header-content">
+      <div class="header-title">
+        <i class="fa-solid fa-trophy header-icon"></i>
+        <h1>Career Pathfinder Results</h1>
       </div>
-      <div class="summary-card">
-        <div class="summary-value">{recommendations.length}</div>
-        <div class="summary-label">Recommendations</div>
-      </div>
-      <div class="summary-card">
-        <div class="summary-value">{alternatePaths.length > 0 ? alternatePaths.length : '3'}</div>
-        <div class="summary-label">Alternate Paths</div>
-      </div>
+      <p class="header-subtitle">
+        {#if userName}
+          Welcome, {userName}! Based on your profile, skills, and preferences, here are your personalized career matches
+        {:else}
+          Your personalized career matches based on skills, preferences, and academic background
+        {/if}
+      </p>
     </div>
   </div>
 
-  {#if recommendations.length === 0}
-    <div class="empty-state" transition:fade>
-      <p>No specific recommendations found based on your criteria.</p>
-      <p>Try adjusting your preferences or skills for better matches.</p>
-    </div>
-  {:else}
-    <!-- Top 3 Matches -->
-    <div class="section-header">
-      <h2>Your Top 3 Career Matches</h2>
-      <p class="section-description">These roles align best with your skills, experience, and preferences</p>
-    </div>
-    
-    <div class="top-matches-grid">
-      {#each results.topMatches as match, i}
-        <div class="result-card top-match" transition:fade>
-          <div class="match-badge" style:background-color={getMatchBadgeColor(match.matchPercentage)}>
-            {match.matchPercentage}% Match
+  <div class="full-width-container">
+    <section class="results-content">
+      <!-- Progress Section -->
+      <div class="progress-container">
+        <div class="progress-info">
+          <div class="progress-step">
+            <div class="step-number">1</div>
+            <span class="step-label">Profile</span>
           </div>
-          <h3>{match.title}</h3>
-          
-          {#if match.industry}
-            <p class="company-location">
-              <svg class="icon" viewBox="0 0 24 24" width="16" height="16">
-                <path fill="currentColor" d="M12 2C8.13 2 5 5.13 5 9c0 5.25 7 13 7 13s7-7.75 7-13c0-3.87-3.13-7-7-7zm0 9.5c-1.38 0-2.5-1.12-2.5-2.5s1.12-2.5 2.5-2.5 2.5 1.12 2.5 2.5-1.12 2.5-2.5 2.5z"/>
-              </svg>
-              Industry: {match.industry}
-            </p>
-          {/if}
-          
-          <!-- Match Meter -->
-          <div class="match-meter">
-            <div class="meter-bar" style="width: {match.matchPercentage}%; background: linear-gradient(90deg, {getMatchBarColor(match.matchPercentage, 0)}, {getMatchBarColor(match.matchPercentage, 1)});"></div>
-            <div class="meter-labels">
-              <span>Low</span>
-              <span>High</span>
+          <div class="progress-line">
+            <div class="progress-bar">
+              <div class="progress-fill" style="width: 100%"></div>
             </div>
           </div>
-          
-          <div class="strengths">
-            <div class="icon">
-              <svg viewBox="0 0 24 24" width="20" height="20">
-                <path fill="currentColor" d="M9 16.17L4.83 12l-1.42 1.41L9 19 21 7l-1.41-1.41L9 16.17z"/>
-              </svg>
-            </div>
-            <div>
-              <strong>Your strengths align:</strong>
-              {#if match.requiredSkills && match.requiredSkills.length > 0}
-                {#each match.requiredSkills.slice(0, 3) as skill, i}
-                  {skill}{i < match.requiredSkills.slice(0, 3).length - 1 ? ', ' : ''}
-                {/each}
-              {:else}
-                {#each match.strengths as strength, i}
-                  {strength}{i < match.strengths.length - 1 ? ', ' : ''}
-                {/each}
-              {/if}
+          <div class="progress-step">
+            <div class="step-number">2</div>
+            <span class="step-label">Preferences</span>
+          </div>
+          <div class="progress-line">
+            <div class="progress-bar">
+              <div class="progress-fill" style="width: 100%"></div>
             </div>
           </div>
-          
-          {#if match.growthOpportunity}
-            <div class="growth">
-              <div class="icon">
-                <svg viewBox="0 0 24 24" width="20" height="20">
-                  <path fill="currentColor" d="M16 6l2.29 2.29-4.88 4.88-4-4L2 16.59 3.41 18l6-6 4 4 6.3-6.29L22 12V6h-6z"/>
-                </svg>
-              </div>
-              <div>
-                <strong>Growth potential:</strong> {match.growthOpportunity}
-              </div>
+          <div class="progress-step">
+            <div class="step-number">3</div>
+            <span class="step-label">Skills</span>
+          </div>
+          <div class="progress-line">
+            <div class="progress-bar">
+              <div class="progress-fill" style="width: 100%"></div>
             </div>
-          {/if}
-          
-          {#if match.salary}
-            <div class="salary">
-              <div class="icon">
-                <svg viewBox="0 0 24 24" width="20" height="20">
-                  <path fill="currentColor" d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm0 18c-4.41 0-8-3.59-8-8s3.59-8 8-8 8 3.59 8 8-3.59 8-8 8zm.31-8.86c-1.77-.45-2.34-.94-2.34-1.67 0-.84.79-1.43 2.1-1.43 1.38 0 1.9.66 1.94 1.64h1.71c-.05-1.34-.87-2.57-2.49-2.97V5H10.9v1.69c-1.51.32-2.72 1.3-2.72 2.81 0 1.79 1.49 2.69 3.66 3.21 1.95.46 2.34 1.15 2.34 1.87 0 .53-.39 1.39-2.1 1.39-1.6 0-2.23-.72-2.32-1.64H8.04c.1 1.7 1.36 2.66 2.86 2.97V19h2.34v-1.67c1.52-.29 2.72-1.16 2.73-2.77-.01-2.2-1.9-2.96-3.66-3.42z"/>
-                </svg>
-              </div>
-              <div>
-                <strong>Estimated Salary:</strong> {match.salary}
-                
-              </div>
+          </div>
+          <div class="progress-step">
+            <div class="step-number">4</div>
+            <span class="step-label">Work</span>
+          </div>
+          <div class="progress-line">
+            <div class="progress-bar">
+              <div class="progress-fill" style="width: 100%"></div>
             </div>
-          {/if}
-          
-          <button class="details-btn" on:click={() => toggleDetails(i)}>
-            {showDetails[i] ? 'Hide Details' : 'Show More Details'}
-            <svg class="chevron" viewBox="0 0 24 24" width="16" height="16">
-              <path fill="currentColor" d="{showDetails[i] ? 'M7.41 15.41L12 10.83l4.59 4.58L18 14l-6-6-6 6z' : 'M7.41 8.59L12 13.17l4.59-4.58L18 10l-6 6-6-6 1.41-1.41z'}"/>
-            </svg>
-          </button>
-          
-          {#if showDetails[i]}
-            <div class="details-section">
-              {#if match.responsibilities}
-                <div class="detail-item">
-                  <strong>Typical Responsibilities:</strong>
-                  <p>{match.responsibilities}</p>
+          </div>
+          <div class="progress-step active">
+            <div class="step-number">5</div>
+            <span class="step-label">Results</span>
+          </div>
+        </div>
+        <div class="progress-text">Step 5 of 5 • 100% complete</div>
+      </div>
+
+      <div class="content-header">
+        <div class="content-title">
+          <h2>Your Career Analysis</h2>
+          <p class="content-subtitle">Based on your profile, skills, and preferences, here are your top career matches</p>
+        </div>
+        <div class="summary-stats">
+          <div class="stat-card">
+            <div class="stat-icon" style="background: linear-gradient(135deg, #10b981, #34d399)">
+              <i class="fa-solid fa-crown"></i>
+            </div>
+            <div class="stat-content">
+              <div class="stat-value">{topMatchScore}%</div>
+              <div class="stat-label">Top Match Score</div>
+            </div>
+          </div>
+          <div class="stat-card">
+            <div class="stat-icon" style="background: linear-gradient(135deg, #6366f1, #818cf8)">
+              <i class="fa-solid fa-chart-line"></i>
+            </div>
+            <div class="stat-content">
+              <div class="stat-value">{averageMatchScore}%</div>
+              <div class="stat-label">Average Match</div>
+            </div>
+          </div>
+          <div class="stat-card">
+            <div class="stat-icon" style="background: linear-gradient(135deg, #f59e0b, #fbbf24)">
+              <i class="fa-solid fa-lightbulb"></i>
+            </div>
+            <div class="stat-content">
+              <div class="stat-value">{totalRecommendations}</div>
+              <div class="stat-label">Total Recommendations</div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Top Career Matches -->
+      {#if recommendations.length > 0}
+        <div class="section-card">
+          <div class="section-header">
+            <div class="title-icon" style="background: linear-gradient(135deg, rgba(16, 185, 129, 0.2), rgba(52, 211, 153, 0.1)); border-color: rgba(16, 185, 129, 0.3); color: #34d399;">
+              <i class="fa-solid fa-check-circle"></i>
+            </div>
+            <div class="title-content">
+              <h3>Top Career Matches</h3>
+              <span class="section-subtitle">These roles align best with your skills and preferences</span>
+            </div>
+            <div class="section-badge">
+              <i class="fa-solid fa-crosshairs"></i>
+              <span>Best Fit</span>
+            </div>
+          </div>
+
+          <div class="matches-grid">
+            {#each recommendations as match, i}
+              <div class="match-card" style="--match-gradient: {match.gradient || getCareerGradient(match.industry)}">
+                <div class="match-header">
+                  <div class="match-score" style="background: linear-gradient(135deg, {getMatchGradient(match.matchPercentage).replace('from-', '').replace('to-', '').replace(' ', ', ')})">
+                    <div class="score-value">{match.matchPercentage}%</div>
+                    <div class="score-label">Match</div>
+                  </div>
+                  <div class="match-title">
+                    <h4>{match.title}</h4>
+                    {#if match.industry}
+                      <span class="match-industry">
+                        <i class="fa-solid fa-building"></i> {match.industry}
+                      </span>
+                    {/if}
+                  </div>
                 </div>
-              {/if}
-              
-              {#if match.requiredSkills}
-                <div class="detail-item">
-                  <strong>Required Skills:</strong>
-                  <div class="skills-container">
-                    {#each match.requiredSkills as skill}
-                      <span class="skill-tag">{skill}</span>
-                    {/each}
+
+                <div class="match-content">
+                  <div class="match-icon" style="background: linear-gradient(135deg, {getMatchGradient(match.matchPercentage).replace('from-', '').replace('to-', '').replace(' ', ', ')})">
+                    <i class="{match.icon || getCareerIcon(match.title, match.industry)}"></i>
+                  </div>
+                  
+                  <div class="match-details">
+                    {#if match.strengths && match.strengths.length > 0}
+                      <div class="detail-item">
+                        <i class="fa-solid fa-check" style="color: {getMatchColor(match.matchPercentage)}"></i>
+                        <span>Strengths: {match.strengths.slice(0, 3).join(', ')}</span>
+                      </div>
+                    {/if}
+                    
+                    {#if match.salary}
+                      <div class="detail-item">
+                        <i class="fa-solid fa-dollar-sign" style="color: {getMatchColor(match.matchPercentage)}"></i>
+                        <span>Salary: {formatSalary(match.salary)}</span>
+                      </div>
+                    {/if}
+                    
+                    {#if match.educationRequired}
+                      <div class="detail-item">
+                        <i class="fa-solid fa-graduation-cap" style="color: {getMatchColor(match.matchPercentage)}"></i>
+                        <span>Education: {match.educationRequired}</span>
+                      </div>
+                    {/if}
+                  </div>
+                </div>
+
+                <div class="match-progress">
+                  <div class="progress-bar">
+                    <div class="progress-fill" style="width: {match.matchPercentage}%; background: linear-gradient(90deg, {getMatchGradient(match.matchPercentage).replace('from-', '').replace('to-', '').replace(' ', ', ')})"></div>
+                  </div>
+                  <div class="progress-labels">
+                    <span>Low Fit</span>
+                    <span>Perfect Fit</span>
+                  </div>
+                </div>
+
+                <button class="details-btn" on:click={() => toggleDetails(i)} aria-label="{expandedDetails[i] ? 'Hide' : 'Show'} details for {match.title}">
+                  {expandedDetails[i] ? 'Hide Details' : 'Show Details'}
+                  <i class="fa-solid fa-chevron-down {expandedDetails[i] ? 'rotate' : ''}"></i>
+                </button>
+
+                {#if expandedDetails[i]}
+                  <div class="details-section" transition:fade>
+                    {#if match.matchReason}
+                      <div class="detail-section">
+                        <h5>Why This Matches You</h5>
+                        <p>{match.matchReason}</p>
+                      </div>
+                    {/if}
+                    
+                    {#if match.responsibilities}
+                      <div class="detail-section">
+                        <h5>Key Responsibilities</h5>
+                        <p>{match.responsibilities}</p>
+                      </div>
+                    {/if}
+                    
+                    {#if match.requiredSkills && match.requiredSkills.length > 0}
+                      <div class="detail-section">
+                        <h5>Key Skills Needed</h5>
+                        <div class="skills-container">
+                          {#each match.requiredSkills as skill}
+                            <span class="skill-tag">{skill}</span>
+                          {/each}
+                        </div>
+                      </div>
+                    {/if}
+                    
+                    {#if match.skillsToDevelop && match.skillsToDevelop.length > 0}
+                      <div class="detail-section">
+                        <h5>Skills to Develop</h5>
+                        <div class="skills-container">
+                          {#each match.skillsToDevelop as skill}
+                            <span class="skill-tag developmental">{skill}</span>
+                          {/each}
+                        </div>
+                      </div>
+                    {/if}
+                    
+                    {#if match.localCompanies && match.localCompanies.length > 0}
+                      <div class="detail-section">
+                        <h5>Local Companies</h5>
+                        <p>{match.localCompanies.join(', ')}</p>
+                      </div>
+                    {/if}
+                  </div>
+                {/if}
+
+                {#if jobLinks[i]}
+                  <a href={jobLinks[i]} target="_blank" rel="noopener noreferrer" class="job-link-btn">
+                    <i class="fa-solid fa-magnifying-glass"></i>
+                    Find {match.title} Jobs on {getPlatformName(jobLinks[i])}
+                  </a>
+                {/if}
+              </div>
+            {/each}
+          </div>
+        </div>
+      {:else}
+        <div class="section-card">
+          <div class="section-header">
+            <div class="title-icon" style="background: linear-gradient(135deg, rgba(239, 68, 68, 0.2), rgba(248, 113, 113, 0.1)); border-color: rgba(239, 68, 68, 0.3); color: #f87171;">
+              <i class="fa-solid fa-exclamation-circle"></i>
+            </div>
+            <div class="title-content">
+              <h3>No Matches Found</h3>
+              <span class="section-subtitle">Try adjusting your preferences or skills to get better matches</span>
+            </div>
+          </div>
+        </div>
+      {/if}
+
+      <!-- Alternative Career Paths -->
+      {#if alternatePaths.length > 0}
+        <div class="section-card">
+          <div class="section-header">
+            <div class="title-icon" style="background: linear-gradient(135deg, rgba(139, 92, 246, 0.2), rgba(167, 139, 250, 0.1)); border-color: rgba(139, 92, 246, 0.3); color: #a78bfa;">
+              <i class="fa-solid fa-compass"></i>
+            </div>
+            <div class="title-content">
+              <h3>Alternative Career Paths</h3>
+              <span class="section-subtitle">Explore these related fields that match your transferable skills</span>
+            </div>
+            <div class="section-badge">
+              <i class="fa-solid fa-network-wired"></i>
+              <span>Explore</span>
+            </div>
+          </div>
+
+          <div class="paths-grid">
+            {#each alternatePaths as path}
+              <div class="path-card" style="--path-gradient: {path.gradient || getMatchGradient(path.matchPercentage)}">
+                <div class="path-icon" style="background: linear-gradient(135deg, {getMatchGradient(path.matchPercentage).replace('from-', '').replace('to-', '').replace(' ', ', ')})">
+                  <i class="{path.icon || 'fa-solid fa-lightbulb'}"></i>
+                </div>
+                <div class="path-content">
+                  <h4>{path.title}</h4>
+                  {#if path.description}
+                    <p class="path-description">{path.description}</p>
+                  {/if}
+                  <div class="path-match">
+                    <span class="match-score">{path.matchPercentage}% Match</span>
+                    <div class="path-progress">
+                      <div class="progress-fill" style="width: {path.matchPercentage}%"></div>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            {/each}
+          </div>
+        </div>
+      {/if}
+
+      <!-- Job Search Resources -->
+      {#if jobLinks.length > 0}
+        <div class="section-card">
+          <div class="section-header">
+            <div class="title-icon" style="background: linear-gradient(135deg, rgba(59, 130, 246, 0.2), rgba(96, 165, 250, 0.1)); border-color: rgba(59, 130, 246, 0.3); color: #60a5fa;">
+              <i class="fa-solid fa-link"></i>
+            </div>
+            <div class="title-content">
+              <h3>Job Search Resources</h3>
+              <span class="section-subtitle">Start your job search with these curated resources</span>
+            </div>
+            <div class="section-badge">
+              <i class="fa-solid fa-rocket"></i>
+              <span>Get Started</span>
+            </div>
+          </div>
+
+          <div class="resources-grid">
+            {#each jobLinks as link, i}
+              {#if i < 3}
+                <div class="resource-card">
+                  <div class="resource-icon">
+                    <i class="fa-solid fa-magnifying-glass"></i>
+                  </div>
+                  <div class="resource-content">
+                    <h4>{recommendations[i]?.title || 'Career Search'}</h4>
+                    <p class="resource-platform">
+                      <i class="fa-solid fa-globe"></i> {getPlatformName(link)}
+                    </p>
+                    <div class="resource-actions">
+                      <a href={link} target="_blank" rel="noopener noreferrer" class="resource-link">
+                        View Jobs
+                        <i class="fa-solid fa-external-link-alt"></i>
+                      </a>
+                      <button class="copy-link" on:click={() => copyLink(link)} aria-label="Copy link to clipboard">
+                        <i class="fa-solid fa-copy"></i>
+                      </button>
+                    </div>
                   </div>
                 </div>
               {/if}
-              
-              {#if match.matchReason}
-                <div class="detail-item">
-                  <strong>Why This Matches You:</strong>
-                  <p>{match.matchReason}</p>
-                </div>
-              {/if}
+            {/each}
+          </div>
+        </div>
+      {/if}
+
+      <!-- Next Steps & Actions -->
+      <div class="section-card">
+        <div class="section-header">
+          <div class="title-icon" style="background: linear-gradient(135deg, rgba(245, 158, 11, 0.2), rgba(251, 191, 36, 0.1)); border-color: rgba(245, 158, 11, 0.3); color: #fbbf24;">
+            <i class="fa-solid fa-rocket"></i>
+          </div>
+          <div class="title-content">
+            <h3>Your Action Plan</h3>
+            <span class="section-subtitle">Take action to advance your career journey</span>
+          </div>
+        </div>
+
+        <div class="next-steps">
+          <div class="step-card">
+            <div class="step-icon" style="background: linear-gradient(135deg, #10b981, #34d399)">
+              <i class="fa-solid fa-list-check"></i>
             </div>
+            <h4>Next Steps</h4>
+            <ul>
+              {#each getSummaryData().suggestedNextSteps.slice(0, 3) as step}
+                <li>{step}</li>
+              {/each}
+            </ul>
+          </div>
+          <div class="step-card">
+            <div class="step-icon" style="background: linear-gradient(135deg, #6366f1, #818cf8)">
+              <i class="fa-solid fa-calendar-alt"></i>
+            </div>
+            <h4>Timeline</h4>
+            <ul>
+              {#each getSummaryData().timelineSuggestions.slice(0, 3) as step}
+                <li>{step}</li>
+              {/each}
+            </ul>
+          </div>
+          <div class="step-card">
+            <div class="step-icon" style="background: linear-gradient(135deg, #ec4899, #f472b6)">
+              <i class="fa-solid fa-graduation-cap"></i>
+            </div>
+            <h4>Skill Development</h4>
+            <p>Focus on developing key skills mentioned in your top matches</p>
+          </div>
+        </div>
+      </div>
+
+      <!-- Action Buttons -->
+      <div class="action-buttons">
+        <button class="action-btn secondary" on:click={startNewAssessment}>
+          <i class="fa-solid fa-rotate-left"></i>
+          <span>Start New Assessment</span>
+        </button>
+        <button class="action-btn primary glow" on:click={handleContinueToDashboard} disabled={isLoading}>
+          {#if isLoading}
+            <div class="button-loader"></div>
+            <span>Saving Results...</span>
+          {:else}
+            <i class="fa-solid fa-check-circle"></i>
+            <span>Save & Go to Dashboard</span>
           {/if}
-          
-          {#if results.jobLinks[i]}
-            <a href={results.jobLinks[i]} target="_blank" rel="noopener noreferrer" class="apply-btn">
-              Find {match.title} Jobs
-              <svg viewBox="0 0 24 24" width="16" height="16" style="margin-left: 8px;">
-                <path fill="currentColor" d="M19 19H5V5h7V3H5a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14c1.1 0 2-.9 2-2v-7h-2v7zM14 3v2h3.59l-9.83 9.83 1.41 1.41L19 6.41V10h2V3h-7z"/>
-              </svg>
-            </a>
-          {/if}
-        </div>
-      {/each}
-    </div>
-
-    <!-- Alternate Paths -->
-    {#if results.alternatePaths.length > 0}
-      <div class="section-header">
-        <h2>Alternative Career Paths</h2>
-        <p class="section-description">These options might also be good fits based on your transferable skills</p>
+        </button>
       </div>
-      
-      <div class="alternate-paths" transition:fade>
-        <div class="paths-grid">
-          {#each results.alternatePaths as path}
-            <div class="path-card">
-              <div class="path-match" style:background={getMatchBarColor(path.matchPercentage, 0.5)}>
-                {path.matchPercentage}% Match
-              </div>
-              <h4>{path.title}</h4>
-              {#if path.description}
-                <p class="path-description">{path.description}</p>
-              {/if}
-              <div class="path-meter">
-                <div class="meter-bar" style="width: {path.matchPercentage}%; background: linear-gradient(90deg, {getMatchBarColor(path.matchPercentage, 0)}, {getMatchBarColor(path.matchPercentage, 1)});"></div>
-              </div>
-            </div>
-          {/each}
-        </div>
-      </div>
-    {/if}
-
-    <!-- Job Links -->
-    {#if results.jobLinks.length > 0}
-      <div class="section-header">
-        <h2>Job Search Resources</h2>
-        <p class="section-description">Find current job openings for your top matches</p>
-      </div>
-      
-      <div class="job-posts" transition:fade>
-        <div class="job-links-grid">
-          {#each results.topMatches as match, i}
-            <div class="job-link-card">
-              <div class="job-link-header">
-                <h4>{match.title}</h4>
-                <span class="job-match">{match.matchPercentage}% Match</span>
-              </div>
-              <div class="job-link-container">
-                <a href={results.jobLinks[i]} target="_blank" rel="noopener noreferrer" class="job-link">
-                  <svg viewBox="0 0 24 24" width="18" height="18" style="margin-right: 8px;">
-                    <path fill="currentColor" d="M12 4.5C7 4.5 2.73 7.61 1 12c1.73 4.39 6 7.5 11 7.5s9.27-3.11 11-7.5c-1.73-4.39-6-7.5-11-7.5zM12 17c-2.76 0-5-2.24-5-5s2.24-5 5-5 5 2.24 5 5-2.24 5-5 5zm0-8c-1.66 0-3 1.34-3 3s1.34 3 3 3 3-1.34 3-3-1.34-3-3-3z"/>
-                  </svg>
-                  View on {getPlatformName(results.jobLinks[i])}
-                </a>
-                <button class="copy" aria-label="Copy job link to clipboard" on:click={() => copyLink(results.jobLinks[i])}>
-                  <span data-text-end="Copied!" data-text-initial="Copy to clipboard" class="tooltip"></span>
-                  <span>
-                    <svg xml:space="preserve" style="enable-background:new 0 0 512 512" viewBox="0 0 6.35 6.35" y="0" x="0" height="20" width="20" xmlns:xlink="http://www.w3.org/1999/xlink" version="1.1" xmlns="http://www.w3.org/2000/svg" class="clipboard">
-                      <g>
-                        <path fill="currentColor" d="M2.43.265c-.3 0-.548.236-.573.53h-.328a.74.74 0 0 0-.735.734v3.822a.74.74 0 0 0 .735.734H4.82a.74.74 0 0 0 .735-.734V1.529a.74.74 0 0 0-.735-.735h-.328a.58.58 0 0 0-.573-.53zm0 .529h1.49c.032 0 .049.017.049.049v.431c0 .032-.017.049-.049.049H2.43c-.032 0-.05-.017-.05-.049V.843c0-.032.018-.05.05-.05zm-.901.53h.328c.026.292.274.528.573.528h1.49a.58.58 0 0 0 .573-.529h.328a.2.2 0 0 1 .206.206v3.822a.2.2 0 0 1-.206.205H1.53a.2.2 0 0 1-.206-.205V1.529a.2.2 0 0 1 .206-.206z"></path>
-                      </g>
-                    </svg>
-                    <svg xml:space="preserve" style="enable-background:new 0 0 512 512" viewBox="0 0 24 24" y="0" x="0" height="18" width="18" xmlns:xlink="http://www.w3.org/1999/xlink" version="1.1" xmlns="http://www.w3.org/2000/svg" class="checkmark">
-                      <g>
-                        <path data-original="#000000" fill="currentColor" d="M9.707 19.121a.997.997 0 0 1-1.414 0l-5.646-5.647a1.5 1.5 0 0 1 0-2.121l.707-.707a1.5 1.5 0 0 1 2.121 0L9 14.171l9.525-9.525a1.5 1.5 0 0 1 2.121 0l.707.707a1.5 1.5 0 0 1 0 2.121z"></path>
-                      </g>
-                    </svg>
-                  </span>
-                </button>
-              </div>
-            </div>
-          {/each}
-        </div>
-      </div>
-    {/if}
-  {/if}
-
-  <!-- Action Buttons -->
-  <div class="action-buttons">
-    <button class="primary-btn" on:click={handleStartOver}>
-      <svg viewBox="0 0 24 24" width="18" height="18" style="margin-right: 8px;">
-        <path fill="currentColor" d="M12 5V1L7 6l5 5V7c3.31 0 6 2.69 6 6s-2.69 6-6 6-6-2.69-6-6H4c0 4.42 3.58 8 8 8s8-3.58 8-8-3.58-8-8-8z"/>
-      </svg>
-      Start Over
-    </button>
-    <button class="secondary-btn" on:click={saveAsPDF} disabled={isSaving}>
-      <svg viewBox="0 0 24 24" width="18" height="18" style="margin-right: 8px;">
-        <path fill="currentColor" d="M19 3H5c-1.11 0-2 .9-2 2v14c0 1.1.89 2 2 2h14c1.1 0 2-.9 2-2V5c0-1.1-.9-2-2-2zm0 16H5V5h14v14zM12 7v6h5v-2h-3V7z"/>
-      </svg>
-      {isSaving ? 'Generating PDF...' : 'Save as PDF'}
-    </button>
+    </section>
   </div>
 </div>
 
-<!-- Confirmation Modal -->
-{#if showConfirmation}
-  <div class="confirmation-modal" transition:fade>
-    <div class="modal-content">
-      <h3>Are you sure you want to start over?</h3>
-      <p>This will reset all your answers and you'll need to begin the assessment again.</p>
-      <div class="modal-buttons">
-        <button class="cancel-btn" on:click={cancelStartOver}>Cancel</button>
-        <button class="confirm-btn" on:click={confirmStartOver}>Start Over</button>
-      </div>
-    </div>
-  </div>
-{/if}
-
 <style>
-  @import url('https://fonts.googleapis.com/css2?family=Poppins:wght@300;400;500;600;700&display=swap');
+  @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=Poppins:wght@400;500;600;700&display=swap');
+  @import url('https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css');
 
-  :global(body) {
-    background: linear-gradient(135deg, #c0c0aa, #1cefff);
-    margin: 0;
-    padding: 2rem 1rem;
-    font-family: 'Poppins', sans-serif;
+  :global(:root) {
+    --gradient-primary: linear-gradient(135deg, #6366f1 0%, #818cf8 100%);
+    --gradient-secondary: linear-gradient(135deg, #f59e0b 0%, #fbbf24 100%);
+    --gradient-success: linear-gradient(135deg, #10b981 0%, #34d399 100%);
+    --gradient-warning: linear-gradient(135deg, #f59e0b 0%, #fbbf24 100%);
+    --gradient-error: linear-gradient(135deg, #ef4444 0%, #f87171 100%);
+  }
+
+  .results-page {
     min-height: 100vh;
+    padding: 0;
+    background: linear-gradient(135deg, #0f172a 0%, #1e293b 100%);
+    font-family: 'Inter', sans-serif;
+    color: #f8fafc;
+    position: relative;
+    overflow-x: hidden;
   }
 
-  .results-container {
-    max-width: 1200px;
-    margin: 0 auto;
-    padding: 2.5rem;
-    background: rgba(255, 255, 255, 0.95);
-    border-radius: 1.5rem;
-    box-shadow: 0 12px 30px rgba(0, 0, 0, 0.1);
-    font-family: 'Poppins', sans-serif;
-    backdrop-filter: blur(5px);
-    border: 1px solid rgba(255, 255, 255, 0.3);
-  }
-
-  .progress-bar {
-    height: 8px;
-    background-color: #e5e7eb;
-    border-radius: 999px;
-    margin-bottom: 2.5rem;
-    overflow: hidden;
-  }
-
-  .progress-complete {
+  /* Background Elements */
+  .background-elements {
+    position: fixed;
+    top: 0;
+    left: 0;
+    width: 100%;
     height: 100%;
-    background: linear-gradient(90deg, #c0c0aa, #1cefff);
-    border-radius: 999px;
-    transition: width 0.5s ease;
+    pointer-events: none;
+    z-index: 1;
+  }
+
+  .bg-gradient {
+    position: absolute;
+    top: 0;
+    right: -200px;
+    width: 600px;
+    height: 600px;
+    background: radial-gradient(circle, rgba(99, 102, 241, 0.1) 0%, rgba(99, 102, 241, 0) 70%);
+    filter: blur(60px);
+  }
+
+  .bg-particle {
+    position: absolute;
+    background: linear-gradient(135deg, #6366f1, #818cf8);
+    border-radius: 50%;
+    opacity: 0.1;
+    animation: float 20s infinite linear;
+  }
+
+  .bg-particle:nth-child(2) {
+    top: 20%;
+    left: 10%;
+    width: 300px;
+    height: 300px;
+    background: linear-gradient(135deg, #ec4899, #f472b6);
+    animation-delay: -5s;
+  }
+
+  .bg-particle:nth-child(3) {
+    top: 60%;
+    right: 15%;
+    width: 200px;
+    height: 200px;
+    background: linear-gradient(135deg, #f59e0b, #fbbf24);
+    animation-delay: -10s;
+  }
+
+  .bg-particle:nth-child(4) {
+    bottom: 10%;
+    left: 20%;
+    width: 400px;
+    height: 400px;
+    background: linear-gradient(135deg, #10b981, #34d399);
+    animation-delay: -15s;
+  }
+
+  @keyframes float {
+    0%, 100% {
+      transform: translateY(0) rotate(0deg);
+    }
+    50% {
+      transform: translateY(-20px) rotate(180deg);
+    }
+  }
+
+  /* Toast Styles */
+  .toast {
+    position: fixed;
+    top: 2rem;
+    right: 2rem;
+    background: rgba(30, 41, 59, 0.95);
+    backdrop-filter: blur(10px);
+    padding: 1rem 1.5rem;
+    border-radius: 1rem;
+    box-shadow: 0 20px 40px rgba(0, 0, 0, 0.3);
+    display: flex;
+    align-items: center;
+    gap: 1rem;
+    z-index: 1000;
+    max-width: 400px;
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    animation: slideInRight 0.3s ease;
+    transform-origin: top right;
+  }
+
+  .toast-icon .icon-wrapper {
+    width: 36px;
+    height: 36px;
+    border-radius: 10px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 1.25rem;
+  }
+
+  .icon-wrapper.success {
+    background: linear-gradient(135deg, #10b981, #34d399);
+    color: white;
+  }
+
+  .icon-wrapper.warning {
+    background: linear-gradient(135deg, #f59e0b, #fbbf24);
+    color: #1e293b;
+  }
+
+  .icon-wrapper.info {
+    background: linear-gradient(135deg, #6366f1, #818cf8);
+    color: white;
+  }
+
+  .toast-message {
+    flex: 1;
+    font-weight: 500;
+  }
+
+  .toast-close {
+    background: rgba(255, 255, 255, 0.1);
+    border: none;
+    color: #94a3b8;
+    cursor: pointer;
+    padding: 0.5rem;
+    border-radius: 0.5rem;
+    transition: all 0.2s;
+  }
+
+  .toast-close:hover {
+    background: rgba(255, 255, 255, 0.2);
+    color: #f8fafc;
+  }
+
+  @keyframes slideInRight {
+    from {
+      transform: translateX(100%) scale(0.9);
+      opacity: 0;
+    }
+    to {
+      transform: translateX(0) scale(1);
+      opacity: 1;
+    }
   }
 
   .results-header {
-    text-align: center;
-    margin-bottom: 3rem;
+    position: relative;
+    z-index: 2;
+    background: rgba(15, 23, 42, 0.8);
+    backdrop-filter: blur(20px);
+    padding: 3rem 1.5rem;
+    margin-bottom: 2rem;
+    border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+    width: 100%;
   }
 
-  h1 {
-    color: #1f2937;
-    font-size: 2.25rem;
-    font-weight: 700;
-    margin-bottom: 0.5rem;
-    background: linear-gradient(90deg, #1f2937, #4b5563);
+  .header-content {
+    max-width: 1400px;
+    margin: 0 auto;
+    text-align: center;
+    padding: 0 2rem;
+  }
+
+  .header-title {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 1rem;
+    margin-bottom: 1rem;
+  }
+
+  .header-icon {
+    font-size: 3rem;
+    background: linear-gradient(135deg, #6366f1, #818cf8);
     background-clip: text;
     -webkit-background-clip: text;
+    color: transparent;
     -webkit-text-fill-color: transparent;
+    filter: drop-shadow(0 4px 20px rgba(99, 102, 241, 0.3));
   }
 
-  .subtitle {
-    color: #4b5563;
+  .results-header h1 {
+    font-size: 2.5rem;
+    font-weight: 700;
+    background: linear-gradient(135deg, #f8fafc, #cbd5e1);
+    background-clip: text;
+    -webkit-background-clip: text;
+    color: transparent;
+    -webkit-text-fill-color: transparent;
+    font-family: 'Poppins', sans-serif;
+    letter-spacing: -0.025em;
+  }
+
+  .header-subtitle {
     font-size: 1.1rem;
-    margin-bottom: 2rem;
-    max-width: 700px;
-    margin-left: auto;
-    margin-right: auto;
+    color: #94a3b8;
+    max-width: 600px;
+    margin: 0 auto;
     line-height: 1.6;
   }
 
-  .match-summary {
+  /* Full width container */
+  .full-width-container {
+    width: 100%;
+    max-width: 100%;
+    padding: 0 1rem;
+    position: relative;
+    z-index: 2;
+  }
+
+  .results-content {
+    width: 100%;
+    max-width: 1400px;
+    margin: 0 auto;
+    background: rgba(30, 41, 59, 0.6);
+    backdrop-filter: blur(20px);
+    padding: 2.5rem 3rem;
+    border-radius: 2rem;
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    box-shadow: 
+      0 20px 40px rgba(0, 0, 0, 0.3),
+      0 0 100px rgba(99, 102, 241, 0.1);
+    margin-bottom: 3rem;
+  }
+
+  /* Progress Section */
+  .progress-container {
+    margin-bottom: 3rem;
+  }
+
+  .progress-info {
     display: flex;
+    align-items: center;
+    justify-content: space-between;
+    margin-bottom: 1rem;
+    gap: 0.5rem;
+  }
+
+  .progress-step {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 0.5rem;
+    position: relative;
+    z-index: 2;
+    flex: 1;
+    min-width: 0;
+  }
+
+  .step-number {
+    width: 40px;
+    height: 40px;
+    border-radius: 50%;
+    background: rgba(255, 255, 255, 0.1);
+    border: 2px solid rgba(255, 255, 255, 0.2);
+    display: flex;
+    align-items: center;
     justify-content: center;
+    font-weight: 600;
+    font-size: 0.875rem;
+    transition: all 0.3s ease;
+  }
+
+  .progress-step.active .step-number {
+    background: linear-gradient(135deg, #6366f1, #818cf8);
+    border-color: #6366f1;
+    box-shadow: 0 4px 20px rgba(99, 102, 241, 0.3);
+    transform: scale(1.1);
+  }
+
+  .step-label {
+    font-size: 0.875rem;
+    color: #94a3b8;
+    font-weight: 500;
+    transition: all 0.3s ease;
+    text-align: center;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    width: 100%;
+  }
+
+  .progress-step.active .step-label {
+    color: #f8fafc;
+    font-weight: 600;
+  }
+
+  .progress-line {
+    flex: 1;
+    height: 4px;
+    background: rgba(255, 255, 255, 0.1);
+    border-radius: 2px;
+    overflow: hidden;
+    min-width: 20px;
+  }
+
+  .progress-bar {
+    width: 100%;
+    height: 100%;
+  }
+
+  .progress-fill {
+    height: 100%;
+    background: linear-gradient(90deg, #6366f1 0%, #818cf8 100%);
+    transition: width 0.5s ease;
+    border-radius: 2px;
+  }
+
+  .progress-text {
+    text-align: center;
+    font-size: 0.875rem;
+    color: #94a3b8;
+    margin-top: 0.5rem;
+  }
+
+  /* Content Header */
+  .content-header {
+    margin-bottom: 2.5rem;
+  }
+
+  .content-title h2 {
+    font-size: 2.25rem;
+    font-weight: 700;
+    background: linear-gradient(135deg, #f8fafc, #cbd5e1);
+    background-clip: text;
+    -webkit-background-clip: text;
+    color: transparent;
+    -webkit-text-fill-color: transparent;
+    font-family: 'Poppins', sans-serif;
+    margin-bottom: 0.5rem;
+  }
+
+  .content-subtitle {
+    font-size: 1.1rem;
+    color: #94a3b8;
+    max-width: 800px;
+    margin-bottom: 2rem;
+  }
+
+  .summary-stats {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
     gap: 1.5rem;
     margin-top: 2rem;
   }
 
-  .summary-card {
-    background: white;
-    border-radius: 12px;
+  .stat-card {
+    background: rgba(255, 255, 255, 0.03);
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    border-radius: 1.25rem;
     padding: 1.5rem;
-    min-width: 120px;
-    text-align: center;
-    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.05);
-    border: 1px solid rgba(0, 0, 0, 0.05);
+    display: flex;
+    align-items: center;
+    gap: 1.25rem;
+    transition: all 0.3s ease;
   }
 
-  .summary-value {
-    font-size: 1.8rem;
+  .stat-card:hover {
+    background: rgba(255, 255, 255, 0.05);
+    transform: translateY(-2px);
+    box-shadow: 0 8px 25px rgba(0, 0, 0, 0.2);
+  }
+
+  .stat-icon {
+    width: 56px;
+    height: 56px;
+    border-radius: 1rem;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 1.5rem;
+    color: white;
+    flex-shrink: 0;
+  }
+
+  .stat-content {
+    flex: 1;
+  }
+
+  .stat-value {
+    font-size: 1.75rem;
     font-weight: 700;
-    color: #1f2937;
-    margin-bottom: 0.5rem;
-    background: linear-gradient(90deg, #c0c0aa, #1cefff);
-    -webkit-background-clip: text;
-    -webkit-text-fill-color: transparent;
+    color: #f8fafc;
+    margin-bottom: 0.25rem;
   }
 
-  .summary-label {
-    font-size: 0.9rem;
-    color: #6b7280;
+  .stat-label {
+    font-size: 0.875rem;
+    color: #94a3b8;
     font-weight: 500;
   }
 
-  .section-header {
-    margin-bottom: 2rem;
-    text-align: center;
-  }
-
-  h2 {
-    color: #1f2937;
-    font-size: 1.8rem;
-    font-weight: 600;
-    margin-bottom: 0.5rem;
+  /* Section Cards */
+  .section-card {
+    background: rgba(255, 255, 255, 0.03);
+    border: 1px solid rgba(255, 255, 255, 0.05);
+    border-radius: 1.5rem;
+    padding: 2.5rem;
+    margin-bottom: 2.5rem;
     position: relative;
-    display: inline-block;
+    overflow: hidden;
   }
 
-  h2::after {
+  .section-card::before {
     content: '';
     position: absolute;
-    bottom: -8px;
-    left: 50%;
-    transform: translateX(-50%);
-    width: 60px;
+    top: 0;
+    left: 0;
+    right: 0;
     height: 3px;
-    background: linear-gradient(90deg, #c0c0aa, #1cefff);
-    border-radius: 3px;
+    background: var(--section-gradient, linear-gradient(90deg, #6366f1, #818cf8));
+    opacity: 0.5;
   }
 
-  .section-description {
-    color: #6b7280;
+  .section-header {
+    display: flex;
+    align-items: center;
+    margin-bottom: 2rem;
+    gap: 1.5rem;
+  }
+
+  .title-icon {
+    width: 64px;
+    height: 64px;
+    border-radius: 1.25rem;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 1.75rem;
+    flex-shrink: 0;
+    border: 1px solid;
+  }
+
+  .title-content {
+    flex: 1;
+  }
+
+  .title-content h3 {
+    font-size: 1.5rem;
+    margin: 0;
+    color: #f8fafc;
+    font-weight: 600;
+    font-family: 'Poppins', sans-serif;
+  }
+
+  .section-subtitle {
     font-size: 1rem;
-    max-width: 700px;
-    margin: 0 auto 1.5rem;
-    line-height: 1.6;
+    color: #94a3b8;
+    margin-top: 0.5rem;
+    display: block;
   }
 
-  .empty-state {
-    text-align: center;
-    padding: 3rem 2rem;
-    color: #6b7280;
-    background-color: #f9fafb;
-    border-radius: 1rem;
-    margin: 2rem 0;
-    border: 1px dashed #e5e7eb;
+  .section-badge {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    background: rgba(255, 255, 255, 0.1);
+    padding: 0.75rem 1.25rem;
+    border-radius: 2rem;
+    font-size: 0.875rem;
+    font-weight: 500;
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    white-space: nowrap;
   }
 
-  .top-matches-grid {
+  .section-badge i {
+    color: #f59e0b;
+  }
+
+  /* Matches Grid */
+  .matches-grid {
     display: grid;
-    grid-template-columns: repeat(auto-fit, minmax(350px, 1fr));
-    gap: 2rem;
-    margin-bottom: 3rem;
+    grid-template-columns: repeat(auto-fill, minmax(350px, 1fr));
+    gap: 1.5rem;
   }
 
-  .result-card {
+  .match-card {
+    background: rgba(255, 255, 255, 0.05);
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    border-radius: 1.25rem;
+    padding: 1.5rem;
+    transition: all 0.3s ease;
     position: relative;
-    background-color: white;
-    border: 1px solid #e5e7eb;
-    padding: 2rem;
+    overflow: hidden;
+  }
+
+  .match-card:hover {
+    background: rgba(255, 255, 255, 0.08);
+    transform: translateY(-2px);
+    box-shadow: 0 10px 30px rgba(0, 0, 0, 0.2);
+  }
+
+  .match-header {
+    display: flex;
+    align-items: flex-start;
+    gap: 1rem;
+    margin-bottom: 1.5rem;
+  }
+
+  .match-score {
+    width: 70px;
+    height: 70px;
     border-radius: 1rem;
-    box-shadow: 0 6px 18px rgba(0, 0, 0, 0.03);
     display: flex;
     flex-direction: column;
-    height: 100%;
-    transition: transform 0.3s ease, box-shadow 0.3s ease;
-  }
-
-  .result-card:hover {
-    transform: translateY(-5px);
-    box-shadow: 0 12px 24px rgba(0, 0, 0, 0.08);
-  }
-
-  .top-match {
-    background-color: white;
-    border: 1px solid rgba(192, 192, 170, 0.3);
-    box-shadow: 0 6px 18px rgba(28, 239, 255, 0.1);
-  }
-
-  .match-badge {
-    position: absolute;
-    top: -12px;
-    right: 20px;
+    align-items: center;
+    justify-content: center;
     color: white;
-    padding: 0.5rem 1.25rem;
-    font-size: 0.8rem;
-    border-radius: 9999px;
     font-weight: 600;
-    box-shadow: 0 4px 8px rgba(0, 0, 0, 0.1);
-    z-index: 1;
+    flex-shrink: 0;
   }
 
-  h3 {
-    font-size: 1.5rem;
-    font-weight: 600;
-    margin: 0.5rem 0 1rem 0;
-    color: #111827;
-    line-height: 1.3;
+  .score-value {
+    font-size: 1.25rem;
+    font-weight: 700;
   }
 
-  .company-location {
-    color: #6b7280;
-    margin-bottom: 1.5rem;
-    font-size: 0.95rem;
+  .score-label {
+    font-size: 0.75rem;
+    opacity: 0.9;
+  }
+
+  .match-title {
+    flex: 1;
+  }
+
+  .match-title h4 {
+    font-size: 1.25rem;
+    margin: 0 0 0.5rem 0;
+    color: #f8fafc;
+    font-weight: 600;
+  }
+
+  .match-industry {
+    font-size: 0.875rem;
+    color: #94a3b8;
     display: flex;
     align-items: center;
     gap: 0.5rem;
   }
 
-  .icon {
-    color: #1cefff;
-  }
-
-  .match-meter {
-    margin: 1rem 0 1.5rem;
-  }
-
-  .meter-bar {
-    height: 8px;
-    border-radius: 4px;
-    margin-bottom: 0.5rem;
-    transition: width 1s ease;
-  }
-
-  .meter-labels {
+  .match-content {
     display: flex;
-    justify-content: space-between;
-    font-size: 0.75rem;
-    color: #6b7280;
+    gap: 1rem;
+    margin-bottom: 1.5rem;
   }
 
-  .strengths, .growth, .salary {
-    display: flex;
-    gap: 0.75rem;
-    align-items: flex-start;
-    margin-bottom: 1.25rem;
-    font-size: 0.95rem;
-    line-height: 1.5;
-  }
-
-  .strengths {
-    margin-top: 1rem;
-  }
-
-  .details-btn {
+  .match-icon {
+    width: 48px;
+    height: 48px;
+    border-radius: 0.875rem;
     display: flex;
     align-items: center;
     justify-content: center;
-    margin: 1.5rem 0;
-    padding: 0.75rem 1.5rem;
-    background: transparent;
-    color: #1cefff;
-    border: 1px solid #1cefff;
-    border-radius: 8px;
+    font-size: 1.5rem;
+    color: white;
+    flex-shrink: 0;
+  }
+
+  .match-details {
+    flex: 1;
+  }
+
+  .detail-item {
+    display: flex;
+    align-items: center;
+    gap: 0.75rem;
+    margin-bottom: 0.75rem;
+    font-size: 0.9rem;
+    color: #cbd5e1;
+  }
+
+  .match-progress {
+    margin-bottom: 1.5rem;
+  }
+
+  .match-progress .progress-bar {
+    height: 6px;
+    background: rgba(255, 255, 255, 0.1);
+    border-radius: 3px;
+    margin-bottom: 0.5rem;
+    overflow: hidden;
+  }
+
+  .match-progress .progress-fill {
+    height: 100%;
+    transition: width 1s ease;
+  }
+
+  .progress-labels {
+    display: flex;
+    justify-content: space-between;
+    font-size: 0.75rem;
+    color: #94a3b8;
+  }
+
+  .details-btn {
+    width: 100%;
+    padding: 0.875rem;
+    background: rgba(255, 255, 255, 0.05);
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    color: #cbd5e1;
+    border-radius: 0.75rem;
     font-size: 0.9rem;
     font-weight: 500;
     cursor: pointer;
-    transition: all 0.3s ease;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 0.5rem;
+    transition: all 0.2s;
+    margin-bottom: 1rem;
   }
 
   .details-btn:hover {
-    background-color: rgba(28, 239, 255, 0.1);
+    background: rgba(255, 255, 255, 0.1);
+    color: #f8fafc;
   }
 
-  .chevron {
-    margin-left: 8px;
+  .details-btn .fa-chevron-down {
     transition: transform 0.3s ease;
+  }
+
+  .details-btn .fa-chevron-down.rotate {
+    transform: rotate(180deg);
   }
 
   .details-section {
     margin-top: 1rem;
     padding-top: 1.5rem;
-    border-top: 1px solid rgba(192, 192, 170, 0.3);
-    animation: fadeIn 0.3s ease;
+    border-top: 1px solid rgba(255, 255, 255, 0.1);
   }
 
-  @keyframes fadeIn {
-    from { opacity: 0; transform: translateY(-10px); }
-    to { opacity: 1; transform: translateY(0); }
-  }
-
-  .detail-item {
+  .detail-section {
     margin-bottom: 1.5rem;
   }
 
-  .detail-item strong {
-    display: block;
+  .detail-section h5 {
+    font-size: 1rem;
+    color: #f8fafc;
     margin-bottom: 0.75rem;
-    color: #1f2937;
-    font-size: 0.95rem;
+    font-weight: 600;
   }
 
-  .detail-item p {
-    margin: 0;
-    color: #4b5563;
+  .detail-section p {
+    color: #cbd5e1;
     font-size: 0.9rem;
     line-height: 1.6;
+    margin: 0;
   }
 
   .skills-container {
@@ -798,517 +1440,545 @@
   }
 
   .skill-tag {
-    background-color: rgba(28, 239, 255, 0.1);
-    color: #0d9488;
-    padding: 0.35rem 0.85rem;
-    border-radius: 999px;
+    background: rgba(255, 255, 255, 0.05);
+    color: #cbd5e1;
+    padding: 0.5rem 0.875rem;
+    border-radius: 2rem;
     font-size: 0.8rem;
     font-weight: 500;
-    border: 1px solid rgba(28, 239, 255, 0.3);
+    border: 1px solid rgba(255, 255, 255, 0.1);
   }
 
-  .apply-btn {
+  .skill-tag.developmental {
+    background: rgba(251, 191, 36, 0.1);
+    color: #fbbf24;
+    border-color: rgba(251, 191, 36, 0.2);
+  }
+
+  .job-link-btn {
     display: flex;
     align-items: center;
     justify-content: center;
-    margin-top: auto;
-    padding: 1rem 1.5rem;
-    background: linear-gradient(90deg, #c0c0aa, #1cefff);
-    color: #1f2937;
-    border-radius: 8px;
-    font-weight: 600;
-    transition: all 0.3s ease;
+    gap: 0.5rem;
+    width: 100%;
+    padding: 1rem;
+    background: linear-gradient(135deg, #6366f1, #818cf8);
+    color: white;
+    border-radius: 0.75rem;
+    font-weight: 500;
     border: none;
     cursor: pointer;
-    text-align: center;
-    width: 100%;
+    transition: all 0.3s ease;
+    text-decoration: none;
   }
 
-  .apply-btn:hover {
+  .job-link-btn:hover {
+    background: linear-gradient(135deg, #818cf8, #6366f1);
     transform: translateY(-2px);
-    box-shadow: 0 6px 12px rgba(28, 239, 255, 0.3);
+    box-shadow: 0 6px 20px rgba(99, 102, 241, 0.4);
   }
 
-  .alternate-paths {
-    margin-bottom: 3rem;
-  }
-
+  /* Paths Grid */
   .paths-grid {
     display: grid;
     grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
     gap: 1.5rem;
-    margin-top: 1.5rem;
   }
 
   .path-card {
-    background-color: white;
-    border: 1px solid rgba(192, 192, 170, 0.3);
-    border-radius: 1rem;
+    background: rgba(255, 255, 255, 0.05);
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    border-radius: 1.25rem;
     padding: 1.5rem;
-    transition: transform 0.3s ease, box-shadow 0.3s ease;
-    position: relative;
-    overflow: hidden;
+    display: flex;
+    align-items: center;
+    gap: 1.25rem;
+    transition: all 0.3s ease;
   }
 
   .path-card:hover {
-    transform: translateY(-5px);
-    box-shadow: 0 8px 20px rgba(28, 239, 255, 0.1);
+    background: rgba(255, 255, 255, 0.08);
+    transform: translateY(-2px);
+    box-shadow: 0 8px 25px rgba(0, 0, 0, 0.2);
   }
 
-  .path-match {
-    position: absolute;
-    top: 0;
-    right: 0;
-    padding: 0.35rem 1rem;
-    font-size: 0.75rem;
-    font-weight: 600;
+  .path-icon {
+    width: 56px;
+    height: 56px;
+    border-radius: 1rem;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 1.5rem;
     color: white;
-    border-bottom-left-radius: 8px;
+    flex-shrink: 0;
+  }
+
+  .path-content {
+    flex: 1;
+  }
+
+  .path-content h4 {
+    font-size: 1.125rem;
+    color: #f8fafc;
+    margin: 0 0 0.5rem 0;
+    font-weight: 600;
   }
 
   .path-description {
-    font-size: 0.9rem;
-    color: #64748b;
-    margin: 1rem 0;
+    font-size: 0.875rem;
+    color: #94a3b8;
+    margin: 0 0 1rem 0;
     line-height: 1.5;
   }
 
-  .path-meter {
-    height: 4px;
-    background-color: #e5e7eb;
-    border-radius: 2px;
-    margin-top: 1.5rem;
-    overflow: hidden;
-  }
-
-  .job-posts {
-    margin-bottom: 2rem;
-  }
-
-  .job-links-grid {
-    display: grid;
-    grid-template-columns: repeat(auto-fill, minmax(350px, 1fr));
-    gap: 1.5rem;
-  }
-
-  .job-link-card {
-    background-color: white;
-    border: 1px solid rgba(192, 192, 170, 0.3);
-    border-radius: 1rem;
-    padding: 1.5rem;
-    transition: transform 0.3s ease;
-  }
-
-  .job-link-card:hover {
-    transform: translateY(-3px);
-  }
-
-  .job-link-header {
-    display: flex;
-    justify-content: space-between;
-    align-items: center;
-    margin-bottom: 1rem;
-  }
-
-  .job-match {
-    font-size: 0.8rem;
-    font-weight: 600;
-    color: white;
-    background-color: #1cefff;
-    padding: 0.25rem 0.75rem;
-    border-radius: 999px;
-  }
-
-  .job-link-container {
+  .path-match {
     display: flex;
     align-items: center;
     gap: 1rem;
   }
 
-  .job-link {
-    flex-grow: 1;
+  .path-match .match-score {
+    font-size: 0.875rem;
+    font-weight: 600;
+    color: #f8fafc;
+    white-space: nowrap;
+  }
+
+  .path-progress {
+    flex: 1;
+    height: 4px;
+    background: rgba(255, 255, 255, 0.1);
+    border-radius: 2px;
+    overflow: hidden;
+  }
+
+  .path-progress .progress-fill {
+    height: 100%;
+    background: linear-gradient(90deg, var(--path-gradient-colors));
+    transition: width 1s ease;
+  }
+
+  /* Resources Grid */
+  .resources-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
+    gap: 1.5rem;
+  }
+
+  .resource-card {
+    background: rgba(255, 255, 255, 0.05);
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    border-radius: 1.25rem;
+    padding: 1.5rem;
+    display: flex;
+    gap: 1.25rem;
+    transition: all 0.3s ease;
+  }
+
+  .resource-card:hover {
+    background: rgba(255, 255, 255, 0.08);
+    transform: translateY(-2px);
+    box-shadow: 0 8px 25px rgba(0, 0, 0, 0.2);
+  }
+
+  .resource-icon {
+    width: 48px;
+    height: 48px;
+    border-radius: 0.875rem;
+    background: linear-gradient(135deg, #6366f1, #818cf8);
     display: flex;
     align-items: center;
-    padding: 0.75rem 1rem;
-    background-color: #f9fafb;
-    border-radius: 8px;
-    color: #1f2937;
+    justify-content: center;
+    font-size: 1.5rem;
+    color: white;
+    flex-shrink: 0;
+  }
+
+  .resource-content {
+    flex: 1;
+  }
+
+  .resource-content h4 {
+    font-size: 1.125rem;
+    color: #f8fafc;
+    margin: 0 0 0.5rem 0;
+    font-weight: 600;
+  }
+
+  .resource-platform {
+    font-size: 0.875rem;
+    color: #94a3b8;
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    margin-bottom: 1rem;
+  }
+
+  .resource-actions {
+    display: flex;
+    gap: 0.75rem;
+  }
+
+  .resource-link {
+    flex: 1;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 0.5rem;
+    padding: 0.75rem;
+    background: rgba(255, 255, 255, 0.05);
+    color: #cbd5e1;
+    border-radius: 0.75rem;
+    font-size: 0.875rem;
     font-weight: 500;
-    transition: all 0.3s ease;
-  }
-
-  .job-link:hover {
-    background-color: #f3f4f6;
     text-decoration: none;
+    transition: all 0.2s;
   }
 
-  /* Copy button styles */
-  .copy {
-    /* button */
-    --button-bg: transparent;
-    --button-hover-bg: #f3f4f6;
-    --button-text-color: #CCCCCC;
-    --button-hover-text-color: #1cefff;
-    --button-border-radius: 8px;
-    --button-diameter: 42px;
-    --button-outline-width: 1px;
-    --button-outline-color: rgb(141, 141, 141);
-    /* tooltip */
-    --tooltip-bg: #1f2937;
-    --toolptip-border-radius: 6px;
-    --tooltip-font-family: 'Poppins', sans-serif;
-    --tooltip-font-size: 12px;
-    --tootip-text-color: white;
-    --tooltip-padding-x: 10px;
-    --tooltip-padding-y: 6px;
-    --tooltip-offset: 10px;
+  .resource-link:hover {
+    background: rgba(255, 255, 255, 0.1);
+    color: #f8fafc;
   }
 
-  .copy {
-    box-sizing: border-box;
-    width: var(--button-diameter);
-    height: var(--button-diameter);
-    border-radius: var(--button-border-radius);
-    background-color: var(--button-bg);
-    color: var(--button-text-color);
-    border: none;
+  .copy-link {
+    width: 40px;
+    height: 40px;
+    background: rgba(255, 255, 255, 0.05);
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    color: #cbd5e1;
+    border-radius: 0.75rem;
+    display: flex;
+    align-items: center;
+    justify-content: center;
     cursor: pointer;
-    position: relative;
-    outline: none;
+    transition: all 0.2s;
+  }
+
+  .copy-link:hover {
+    background: rgba(255, 255, 255, 0.1);
+    color: #f8fafc;
+  }
+
+  /* Next Steps */
+  .next-steps {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
+    gap: 1.5rem;
+  }
+
+  .step-card {
+    background: rgba(255, 255, 255, 0.05);
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    border-radius: 1.25rem;
+    padding: 1.5rem;
     transition: all 0.3s ease;
   }
 
-  .tooltip {
-    position: absolute;
-    opacity: 0;
-    visibility: 0;
-    top: -35px;
-    left: 50%;
-    transform: translateX(-50%);
-    white-space: nowrap;
-    font: var(--tooltip-font-size) var(--tooltip-font-family);
-    color: var(--tootip-text-color);
-    background: var(--tooltip-bg);
-    padding: var(--tooltip-padding-y) var(--tooltip-padding-x);
-    border-radius: var(--toolptip-border-radius);
-    pointer-events: none;
-    transition: all 0.2s ease;
+  .step-card:hover {
+    background: rgba(255, 255, 255, 0.08);
+    transform: translateY(-2px);
+    box-shadow: 0 8px 25px rgba(0, 0, 0, 0.2);
   }
 
-  .tooltip::before {
-    content: attr(data-text-initial);
+  .step-icon {
+    width: 56px;
+    height: 56px;
+    border-radius: 1rem;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 1.5rem;
+    color: white;
+    margin: 0 auto 1rem;
   }
 
-  .tooltip::after {
-    content: "";
-    position: absolute;
-    bottom: calc(var(--tooltip-padding-y) / 2 * -1);
-    width: var(--tooltip-padding-y);
-    height: var(--tooltip-padding-y);
-    background: inherit;
-    left: 50%;
-    transform: translateX(-50%) rotate(45deg);
-    z-index: -999;
-    pointer-events: none;
+  .step-card h4 {
+    font-size: 1.125rem;
+    color: #f8fafc;
+    margin: 0 0 0.75rem 0;
+    font-weight: 600;
   }
 
-  .copy svg {
-    position: absolute;
-    top: 50%;
-    left: 50%;
-    transform: translate(-50%, -50%);
+  .step-card p, .step-card ul {
+    font-size: 0.875rem;
+    color: #94a3b8;
+    line-height: 1.5;
+    margin: 0;
   }
 
-  .checkmark {
-    display: none;
+  .step-card ul {
+    padding-left: 1.25rem;
   }
 
-  /* actions */
-  .copy:hover .tooltip,
-  .copy:focus:not(:focus-visible) .tooltip {
-    opacity: 1;
-    visibility: visible;
-    top: calc((100% + var(--tooltip-offset)) * -1);
+  .step-card li {
+    margin-bottom: 0.5rem;
   }
 
-  .copy:focus:not(:focus-visible) .tooltip::before {
-    content: attr(data-text-end);
-  }
-
-  .copy:focus:not(:focus-visible) .clipboard {
-    display: none;
-  }
-
-  .copy:focus:not(:focus-visible) .checkmark {
-    display: block;
-  }
-
-  .copy:hover,
-  .copy:focus {
-    background-color: var(--button-hover-bg);
-  }
-
-  .copy:active {
-    outline: var(--button-outline-width) solid var(--button-outline-color);
-  }
-
-  .copy:hover svg {
-    color: var(--button-hover-text-color);
+  .step-card li:last-child {
+    margin-bottom: 0;
   }
 
   /* Action Buttons */
   .action-buttons {
     display: flex;
-    flex-wrap: wrap;
-    gap: 1.5rem;
+    align-items: center;
+    justify-content: center;
     margin-top: 3rem;
-    justify-content: center;
+    gap: 1.5rem;
   }
 
-  .primary-btn {
-    display: flex;
-    align-items: center;
-    background: linear-gradient(90deg, #c0c0aa, #1cefff);
-    color: #1f2937;
+  .action-btn {
+    padding: 1.125rem 2.25rem;
     border: none;
-    border-radius: 12px;
-    padding: 1rem 2rem;
-    font-size: 1rem;
-    font-weight: 600;
-    cursor: pointer;
-    box-shadow: 0 4px 15px rgba(28, 239, 255, 0.3);
-    transition: all 0.3s ease;
-  }
-
-  .primary-btn:hover {
-    transform: translateY(-2px);
-    box-shadow: 0 6px 20px rgba(28, 239, 255, 0.4);
-  }
-
-  .primary-btn:disabled {
-    opacity: 0.7;
-    cursor: not-allowed;
-  }
-
-  .secondary-btn {
-    display: flex;
-    align-items: center;
-    background-color: white;
-    color: #1f2937;
-    padding: 1rem 2rem;
-    border-radius: 12px;
-    border: 2px solid #1cefff;
-    font-size: 1rem;
-    font-weight: 600;
-    cursor: pointer;
-    transition: all 0.3s ease;
-  }
-
-  .secondary-btn:hover {
-    background-color: rgba(28, 239, 255, 0.1);
-    transform: translateY(-2px);
-  }
-
-  .secondary-btn:disabled {
-    opacity: 0.7;
-    cursor: not-allowed;
-    background-color: white;
-  }
-
-  /* Confirmation Modal */
-  .confirmation-modal {
-    position: fixed;
-    top: 0;
-    left: 0;
-    right: 0;
-    bottom: 0;
-    background-color: rgba(0, 0, 0, 0.5);
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    z-index: 1000;
-    backdrop-filter: blur(5px);
-  }
-
-  .modal-content {
-    background-color: white;
-    padding: 2rem;
     border-radius: 1rem;
-    max-width: 500px;
-    width: 90%;
-    box-shadow: 0 10px 25px rgba(0, 0, 0, 0.2);
-    text-align: center;
-  }
-
-  .modal-content h3 {
-    font-size: 1.5rem;
-    margin-bottom: 1rem;
-    color: #1f2937;
-  }
-
-  .modal-content p {
-    color: #6b7280;
-    margin-bottom: 2rem;
-    line-height: 1.6;
-  }
-
-  .modal-buttons {
+    font-size: 1rem;
+    cursor: pointer;
+    transition: all 0.3s ease;
+    font-weight: 500;
+    min-width: 200px;
     display: flex;
+    align-items: center;
     justify-content: center;
-    gap: 1rem;
+    gap: 0.75rem;
   }
 
-  .cancel-btn {
-    padding: 0.75rem 1.5rem;
-    background-color: #f3f4f6;
-    color: #1f2937;
-    border: none;
-    border-radius: 8px;
-    font-weight: 600;
-    cursor: pointer;
-    transition: all 0.2s ease;
+  .action-btn.primary {
+    background: linear-gradient(135deg, #10b981, #34d399);
+    color: white;
+    position: relative;
+    overflow: hidden;
   }
 
-  .cancel-btn:hover {
-    background-color: #e5e7eb;
+  .action-btn.secondary {
+    background: rgba(255, 255, 255, 0.05);
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    color: #cbd5e1;
   }
 
-  .confirm-btn {
-    padding: 0.75rem 1.5rem;
-    background: linear-gradient(90deg, #c0c0aa, #1cefff);
-    color: #1f2937;
-    border: none;
-    border-radius: 8px;
-    font-weight: 600;
-    cursor: pointer;
-    transition: all 0.2s ease;
+  .action-btn.secondary:hover {
+    background: rgba(255, 255, 255, 0.1);
+    color: #f8fafc;
   }
 
-  .confirm-btn:hover {
-    opacity: 0.9;
-    transform: translateY(-1px);
+  .action-btn.primary.glow {
+    box-shadow: 
+      0 5px 25px rgba(16, 185, 129, 0.4),
+      0 0 50px rgba(16, 185, 129, 0.2);
+    animation: glow 2s infinite;
+  }
+
+  .action-btn.primary:hover:not(:disabled) {
+    background: linear-gradient(135deg, #34d399, #10b981);
+    transform: translateY(-2px);
+    box-shadow: 
+      0 10px 30px rgba(16, 185, 129, 0.5),
+      0 0 60px rgba(16, 185, 129, 0.3);
+  }
+
+  .action-btn.primary:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+    background: #475569;
+    box-shadow: none;
+  }
+
+  @keyframes glow {
+    0%, 100% {
+      box-shadow: 
+        0 5px 25px rgba(16, 185, 129, 0.4),
+        0 0 50px rgba(16, 185, 129, 0.2);
+    }
+    50% {
+      box-shadow: 
+        0 5px 35px rgba(16, 185, 129, 0.6),
+        0 0 70px rgba(16, 185, 129, 0.3);
+    }
+  }
+
+  .button-loader {
+    width: 20px;
+    height: 20px;
+    border: 2px solid rgba(255, 255, 255, 0.3);
+    border-top-color: white;
+    border-radius: 50%;
+    animation: spin 1s linear infinite;
+  }
+
+  @keyframes spin {
+    to { transform: rotate(360deg); }
+  }
+
+  /* Responsive Design */
+  @media (max-width: 1400px) {
+    .results-content {
+      max-width: 1200px;
+      padding: 2.5rem;
+    }
+  }
+
+  @media (max-width: 1200px) {
+    .matches-grid {
+      grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
+    }
+    
+    .paths-grid, .resources-grid, .next-steps {
+      grid-template-columns: repeat(auto-fill, minmax(250px, 1fr));
+    }
   }
 
   @media (max-width: 1024px) {
-    .results-container {
+    .results-content {
+      max-width: 1000px;
       padding: 2rem;
     }
     
-    .top-matches-grid, .job-links-grid {
-      grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
-    }
-  }
-
-  @media (max-width: 768px) {
-    :global(body) {
-      padding: 1rem;
+    .section-card {
+      padding: 2rem;
     }
     
-    .results-container {
-      padding: 1.5rem;
-    }
-    
-    .match-summary {
+    .match-content {
       flex-direction: column;
-      align-items: center;
-      gap: 1rem;
-    }
-    
-    .summary-card {
-      width: 100%;
-      max-width: 200px;
+      align-items: flex-start;
     }
     
     .action-buttons {
       flex-direction: column;
+      gap: 1rem;
     }
     
-    .primary-btn, .secondary-btn {
+    .action-btn {
       width: 100%;
-      justify-content: center;
+      min-width: auto;
+    }
+  }
+
+  @media (max-width: 768px) {
+    .results-page {
+      padding: 0;
     }
 
-    .modal-buttons {
+    .toast {
+      top: 1rem;
+      right: 1rem;
+      left: 1rem;
+      max-width: none;
+    }
+
+    .results-header {
+      padding: 2rem 1rem;
+    }
+
+    .results-header h1 {
+      font-size: 2rem;
+    }
+
+    .header-subtitle {
+      font-size: 1rem;
+    }
+
+    .results-content {
+      padding: 1.75rem;
+      margin: 0 0.5rem;
+      border-radius: 1.5rem;
+    }
+
+    .content-header {
       flex-direction: column;
+      align-items: flex-start;
+      gap: 1rem;
     }
 
-    .cancel-btn, .confirm-btn {
-      width: 100%;
+    .content-title h2 {
+      font-size: 1.75rem;
+    }
+
+    .summary-stats {
+      grid-template-columns: 1fr;
+    }
+
+    .matches-grid, .paths-grid, .resources-grid, .next-steps {
+      grid-template-columns: 1fr;
+    }
+
+    .section-header {
+      flex-direction: column;
+      align-items: flex-start;
+      gap: 1rem;
+    }
+
+    .title-icon {
+      width: 56px;
+      height: 56px;
+      font-size: 1.5rem;
+    }
+
+    .section-badge {
+      align-self: flex-start;
+    }
+  }
+
+  @media (max-width: 640px) {
+    .progress-info {
+      flex-wrap: wrap;
+      gap: 1rem;
+    }
+    
+    .progress-step {
+      flex: 0 0 calc(20% - 1rem);
+      margin-bottom: 1rem;
+    }
+    
+    .progress-line {
+      display: none;
     }
   }
 
   @media (max-width: 480px) {
-    h1 {
-      font-size: 1.75rem;
-    }
-    
-    h2 {
-      font-size: 1.5rem;
-    }
-    
-    .top-matches-grid, .paths-grid, .job-links-grid {
-      grid-template-columns: 1fr;
-    }
-    
-    .result-card {
+    .results-content {
       padding: 1.5rem;
     }
-    
-    .job-link-container {
-      flex-direction: column;
-      gap: 0.5rem;
-    }
-    
-    .job-link {
-      width: 100%;
-    }
-  }
 
-  @media print {
-    :global(body) {
-      background: white !important;
-      padding: 0 !important;
+    .section-card {
+      padding: 1.5rem;
+    }
+
+    .match-card {
+      padding: 1.25rem;
+    }
+
+    .match-header {
+      flex-direction: column;
+      align-items: flex-start;
+    }
+
+    .match-score {
+      width: 60px;
+      height: 60px;
+    }
+
+    .progress-step {
+      flex: 0 0 calc(50% - 1rem);
     }
     
-    .results-container, .results-container * {
-      visibility: visible;
+    .progress-step:nth-child(9) {
+      display: none;
     }
     
-    .results-container {
-      position: absolute;
-      left: 0;
-      top: 0;
-      width: 100%;
-      margin: 0;
-      padding: 20px;
-      box-shadow: none;
-      background: white;
+    .progress-step:nth-child(10) {
+      display: none;
     }
     
-    .action-buttons, .details-btn, .copy {
-      display: none !important;
+    .progress-step:nth-child(11) {
+      display: none;
     }
     
-    /* Ensure all details are visible when printing */
-    .details-section {
-      display: block !important;
+    .progress-info {
+      justify-content: space-around;
+    }
+    
+    .action-btn {
+      padding: 1rem 1.5rem;
     }
   }
 </style>
-
-<script context="module">
-  // Helper functions for match percentage colors
-  export function getMatchBadgeColor(percentage: number): string {
-    if (percentage >= 90) return '#10b981';
-    if (percentage >= 75) return '#3b82f6';
-    if (percentage >= 60) return '#f59e0b';
-    return '#ef4444';
-  }
-
-  export function getMatchBarColor(percentage: number, opacity = 1): string {
-    if (percentage >= 90) return `rgba(16, 185, 129, ${opacity})`;
-    if (percentage >= 75) return `rgba(59, 130, 246, ${opacity})`;
-    if (percentage >= 60) return `rgba(245, 158, 11, ${opacity})`;
-    return `rgba(239, 68, 68, ${opacity})`;
-  }
-</script>
