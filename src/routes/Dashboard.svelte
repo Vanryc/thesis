@@ -192,6 +192,11 @@
     date: ''
   };
 
+  // Function to validate phone number input (only allow numbers and common phone characters)
+  function validatePhoneNumber(value: string): string {
+    return value.replace(/[^0-9+\-\s()]/g, '');
+  }
+
   // Career descriptions database
   const careerDescriptions: Record<string, any> = {
     'Software Developer': {
@@ -2731,8 +2736,8 @@
       </footer>
     </div>
   </main>
-  <!-- Modals -->
-  <!-- Edit Profile Modal -->
+
+  <!-- Edit Profile Modal with Phone Validation -->
   {#if showEditProfile}
     <div class="modal-overlay" transition:fade>
       <div class="modal" transition:scale>
@@ -2769,13 +2774,23 @@
               />
             </div>
             <div class="form-group">
-              <label for="phone">Phone</label>
+              <label for="phone">Phone Number</label>
               <input 
                 id="phone" 
                 type="tel" 
-                bind:value={editProfileData.phone} 
+                bind:value={editProfileData.phone}
+                on:input={(e) => {
+                  // Only allow numbers and common phone characters (+, -, space, parentheses)
+                  const input = e.target as HTMLInputElement;
+                  input.value = validatePhoneNumber(input.value);
+                  editProfileData.phone = input.value;
+                }}
+                pattern="[0-9+\-\s()]+"
+                title="Please enter a valid phone number (numbers, +, -, space, parentheses only)"
+                placeholder="e.g., +63 912 345 6789"
                 aria-label="Phone number (optional)"
               />
+              <small class="input-hint">Numbers, +, -, space, and parentheses only</small>
             </div>
             <div class="form-actions">
               <button 
@@ -2801,7 +2816,7 @@
     </div>
   {/if}
 
-  <!-- Resume Generator Modal -->
+  <!-- Resume Generator Modal with Phone Validation -->
   {#if showResumeModal}
     <div class="modal-overlay resume-modal-overlay" transition:fade>
       <div class="resume-modal" transition:scale>
@@ -2824,7 +2839,7 @@
           <div class="resume-builder-section">
             <h3><i class="fa-solid fa-edit"></i> Customize Your Resume</h3>
             
-            <!-- Contact Information -->
+            <!-- Contact Information with Phone Validation -->
             <div class="resume-section">
               <h4><i class="fa-solid fa-address-card"></i> Contact Information</h4>
               <div class="form-grid">
@@ -2838,13 +2853,23 @@
                   />
                 </div>
                 <div class="form-group">
-                  <label for="resume-phone">Phone</label>
+                  <label for="resume-phone">Phone Number</label>
                   <input 
                     id="resume-phone"
                     type="tel" 
-                    bind:value={resumeData.phone} 
-                    placeholder="(123) 456-7890" 
+                    bind:value={resumeData.phone}
+                    on:input={(e) => {
+                      // Only allow numbers and common phone characters (+, -, space, parentheses)
+                      const input = e.target as HTMLInputElement;
+                      input.value = validatePhoneNumber(input.value);
+                      resumeData.phone = input.value;
+                    }}
+                    pattern="[0-9+\-\s()]+"
+                    title="Please enter a valid phone number (numbers, +, -, space, parentheses only)"
+                    placeholder="e.g., +63 912 345 6789"
+                    aria-label="Phone number"
                   />
+                  <small class="input-hint">Numbers, +, -, space, and parentheses only</small>
                 </div>
                 <div class="form-group">
                   <label for="resume-location">Location</label>
@@ -5785,6 +5810,23 @@
       .form-grid {
         grid-template-columns: 1fr;
       }
+    }
+
+    /* Input hint for phone number */
+    .input-hint {
+      display: block;
+      font-size: 0.75rem;
+      color: var(--text-muted);
+      margin-top: 0.25rem;
+    }
+
+    /* Style for invalid input */
+    .form-group input:invalid {
+      border-color: var(--error);
+    }
+
+    .form-group input:invalid:focus {
+      box-shadow: 0 0 0 2px rgba(239, 68, 68, 0.1);
     }
 
     /* Skills section improvements */
