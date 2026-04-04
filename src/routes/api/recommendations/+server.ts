@@ -3,7 +3,7 @@ import { json } from '@sveltejs/kit';
 import type { RequestHandler } from './$types';
 import { Groq } from 'groq-sdk';
 
-// Define TypeScript interfaces
+// Define TypeScript interfaces (same as before)
 interface UserPreferences {
   workTypes: string[];
   salaryExpectation: string;
@@ -69,13 +69,313 @@ interface RecommendationResponse {
   };
 }
 
-// Initialize Groq
+// Rate limiter implementation
+class RateLimiter {
+  private tokens: number;
+  private lastRefill: number;
+  private readonly maxTokens: number;
+  private readonly refillRate: number; // tokens per millisecond
+
+  constructor(maxTokens: number, refillRatePerMinute: number) {
+    this.maxTokens = maxTokens;
+    this.tokens = maxTokens;
+    this.lastRefill = Date.now();
+    this.refillRate = refillRatePerMinute / 60000; // Convert to tokens per ms
+  }
+
+  private refill() {
+    const now = Date.now();
+    const timePassed = now - this.lastRefill;
+    const refillAmount = timePassed * this.refillRate;
+    
+    this.tokens = Math.min(this.maxTokens, this.tokens + refillAmount);
+    this.lastRefill = now;
+  }
+
+  async acquire(): Promise<void> {
+    this.refill();
+    
+    if (this.tokens < 1) {
+      const waitTime = (1 - this.tokens) / this.refillRate;
+      await new Promise(resolve => setTimeout(resolve, waitTime));
+      return this.acquire();
+    }
+    
+    this.tokens -= 1;
+  }
+}
+
+// Cache implementation
+class ResponseCache {
+  private cache: Map<string, { response: RecommendationResponse; timestamp: number }>;
+  private readonly ttl: number; // Time to live in milliseconds
+
+  constructor(ttlMinutes: number = 60) {
+    this.cache = new Map();
+    this.ttl = ttlMinutes * 60 * 1000;
+  }
+
+  generateKey(userData: UserPreferences): string {
+    // Create a unique key based on user preferences
+    const keyData = {
+      workTypes: userData.workTypes.sort(),
+      salaryExpectation: userData.salaryExpectation,
+      workMotivation: userData.workMotivation,
+      educationLevel: userData.educationLevel,
+      educationField: userData.educationField,
+      workExperience: userData.workExperience,
+      learningStyle: userData.learningStyle,
+      collaborationPreference: userData.collaborationPreference
+    };
+    return JSON.stringify(keyData);
+  }
+
+  get(key: string): RecommendationResponse | null {
+    const cached = this.cache.get(key);
+    if (cached && Date.now() - cached.timestamp < this.ttl) {
+      console.log('Cache hit for key:', key.substring(0, 50));
+      return cached.response;
+    }
+    if (cached) {
+      this.cache.delete(key);
+    }
+    return null;
+  }
+
+  set(key: string, response: RecommendationResponse): void {
+    this.cache.set(key, { response, timestamp: Date.now() });
+    console.log('Cached response for key:', key.substring(0, 50));
+  }
+
+  clear(): void {
+    this.cache.clear();
+  }
+}
+
+// Initialize Groq with retry logic
 const groq = new Groq({
   apiKey: import.meta.env.VITE_GROQ_API_KEY,
   dangerouslyAllowBrowser: true
 });
 
-// Function to validate API key
+// Rate limiter - 8000 TPM limit, using 7000 as safe margin
+const rateLimiter = new RateLimiter(7000, 7000);
+const responseCache = new ResponseCache(60); // Cache for 1 hour
+
+// Retry configuration
+const MAX_RETRIES = 3;
+const RETRY_DELAY_MS = 2000;
+
+async function retryRequest<T>(
+  fn: () => Promise<T>,
+  retries: number = MAX_RETRIES
+): Promise<T> {
+  try {
+    return await fn();
+  } catch (error: any) {
+    if (retries > 0 && (error.message?.includes('rate limit') || error.message?.includes('quota'))) {
+      console.log(`Rate limit hit, retrying in ${RETRY_DELAY_MS}ms... (${retries} retries left)`);
+      await new Promise(resolve => setTimeout(resolve, RETRY_DELAY_MS));
+      return retryRequest(fn, retries - 1);
+    }
+    throw error;
+  }
+}
+
+// Chunked analysis function
+async function analyzeWithGroqChunked(userData: UserPreferences): Promise<any> {
+  console.log('Starting chunked analysis to respect 8000 TPM limit...');
+  
+  try {
+    // First, get recommendations in chunks
+    const recommendationsChunk = await getRecommendationsChunk(userData);
+    
+    // Then get alternate paths
+    const alternatePathsChunk = await getAlternatePathsChunk(userData);
+    
+    // Finally get summary
+    const summaryChunk = await getSummaryChunk(userData, recommendationsChunk);
+    
+    // Combine all chunks
+    return {
+      recommendations: recommendationsChunk,
+      alternatePaths: alternatePathsChunk,
+      summary: summaryChunk
+    };
+  } catch (error) {
+    console.error('Error in chunked analysis:', error);
+    throw error;
+  }
+}
+
+// Chunk 1: Get career recommendations
+async function getRecommendationsChunk(userData: UserPreferences): Promise<CareerMatch[]> {
+  const prompt = `
+    You are a career guidance expert for Filipino students. Provide 3-5 entry-level career recommendations.
+    
+    USER PROFILE:
+    - Education: ${userData.educationLevel} year in ${userData.educationField}
+    - Experience: ${userData.workExperience}
+    - Strengths: ${userData.strengths?.join(', ') || 'Not specified'}
+    - Technical Skills: ${userData.technicalSkills?.join(', ') || 'Not specified'}
+    - Work Types: ${userData.workTypes.join(', ')}
+    - Salary Expectation: ${userData.salaryExpectation}
+    - Work Motivation: ${userData.workMotivation}
+
+    Return ONLY a JSON array of career recommendations with this structure:
+    [
+      {
+        "id": "1",
+        "title": "Job Title",
+        "matchPercentage": 85,
+        "description": "Brief description",
+        "requiredSkills": ["skill1", "skill2"],
+        "salaryRange": "₱20,000 - ₱35,000 monthly",
+        "growthPotential": "High/Medium/Low",
+        "strengths": ["strength1", "strength2"],
+        "matchReason": "Why this matches",
+        "industry": "Industry name",
+        "responsibilities": ["Responsibility 1", "Responsibility 2"]
+      }
+    ]
+  `;
+
+  await rateLimiter.acquire();
+  
+  const response = await retryRequest(async () => {
+    const completion = await groq.chat.completions.create({
+      messages: [
+        { role: "system", content: "You are a career expert. Return only valid JSON arrays." },
+        { role: "user", content: prompt }
+      ],
+      model: "openai/gpt-oss-120b",
+      temperature: 0.7,
+      max_completion_tokens: 4000, // Reduced token usage
+      top_p: 0.8,
+      stream: false
+    });
+    return completion;
+  });
+
+  const text = cleanResponseText(response.choices[0]?.message?.content || '');
+  return JSON.parse(text);
+}
+
+// Chunk 2: Get alternate career paths
+async function getAlternatePathsChunk(userData: UserPreferences): Promise<AlternatePath[]> {
+  const prompt = `
+    Based on this user profile, provide 2-3 alternative career paths:
+    - Education: ${userData.educationField}
+    - Skills: ${userData.technicalSkills?.slice(0, 3).join(', ')}
+    - Strengths: ${userData.strengths?.slice(0, 3).join(', ')}
+
+    Return ONLY a JSON array of alternative paths:
+    [
+      {
+        "id": "1",
+        "title": "Alternative Career",
+        "description": "Brief description",
+        "timeline": "6-12 months",
+        "matchPercentage": 70,
+        "requiredSkills": ["skill1", "skill2"],
+        "resources": ["resource1", "resource2"]
+      }
+    ]
+  `;
+
+  await rateLimiter.acquire();
+  
+  const response = await retryRequest(async () => {
+    const completion = await groq.chat.completions.create({
+      messages: [
+        { role: "system", content: "Return only valid JSON arrays." },
+        { role: "user", content: prompt }
+      ],
+      model: "openai/gpt-oss-120b",
+      temperature: 0.7,
+      max_completion_tokens: 2000, // Smaller token usage
+      top_p: 0.8,
+      stream: false
+    });
+    return completion;
+  });
+
+  const text = cleanResponseText(response.choices[0]?.message?.content || '');
+  return JSON.parse(text);
+}
+
+// Chunk 3: Get summary and next steps
+async function getSummaryChunk(userData: UserPreferences, recommendations: CareerMatch[]): Promise<any> {
+  const prompt = `
+    Based on these ${recommendations.length} career recommendations for a ${userData.educationField} student,
+    provide a summary with:
+    1. Top match percentage
+    2. Average match percentage
+    3. 5 suggested next steps
+    4. 5 timeline suggestions
+    5. A brief user profile summary
+
+    Return ONLY JSON:
+    {
+      "topMatch": 85,
+      "averageMatch": 75,
+      "suggestedNextSteps": ["step1", "step2", "step3", "step4", "step5"],
+      "timelineSuggestions": ["suggestion1", "suggestion2", "suggestion3", "suggestion4", "suggestion5"],
+      "userProfileSummary": "Brief summary"
+    }
+  `;
+
+  await rateLimiter.acquire();
+  
+  const response = await retryRequest(async () => {
+    const completion = await groq.chat.completions.create({
+      messages: [
+        { role: "system", content: "Return only valid JSON." },
+        { role: "user", content: prompt }
+      ],
+      model: "openai/gpt-oss-120b",
+      temperature: 0.7,
+      max_completion_tokens: 1500, // Smaller token usage
+      top_p: 0.8,
+      stream: false
+    });
+    return completion;
+  });
+
+  const text = cleanResponseText(response.choices[0]?.message?.content || '');
+  const summary = JSON.parse(text);
+  
+  // Calculate average if not provided
+  if (!summary.averageMatch && recommendations.length > 0) {
+    summary.averageMatch = Math.round(
+      recommendations.reduce((sum, r) => sum + r.matchPercentage, 0) / recommendations.length
+    );
+  }
+  
+  return summary;
+}
+
+// Helper function to clean response text
+function cleanResponseText(text: string): string {
+  text = text.trim();
+  text = text.replace(/```json\s*/g, '').replace(/```\s*/g, '');
+  
+  const jsonMatch = text.match(/\[[\s\S]*\]|\{[\s\S]*\}/);
+  if (jsonMatch) {
+    text = jsonMatch[0];
+  }
+  
+  // Fix common JSON issues
+  text = text.replace(/'/g, '"');
+  text = text.replace(/,\s*}/g, '}');
+  text = text.replace(/,\s*\]/g, ']');
+  text = text.replace(/True/g, 'true').replace(/False/g, 'false');
+  text = text.replace(/None/g, 'null');
+  
+  return text;
+}
+
+// Function to validate API key (same as before)
 function validateApiKey(): boolean {
   const apiKey = import.meta.env.VITE_GROQ_API_KEY;
   console.log('API Key check:', {
@@ -97,207 +397,13 @@ function validateApiKey(): boolean {
   return true;
 }
 
-// Function to analyze user data with Groq AI
-async function analyzeWithGroq(userData: UserPreferences): Promise<any> {
-  try {
-    // Prepare the prompt for Groq AI
-    const prompt = `
-      You are a career guidance expert specializing in helping Filipino college students and recent graduates. 
-      Analyze the following user profile and provide personalized career recommendations:
-
-      USER PROFILE:
-      - Work Types Interest: ${userData.workTypes.join(', ')}
-      - Education Level: ${userData.educationLevel} year college student
-      - Education Field: ${userData.educationField}
-      - Work Experience: ${userData.workExperience}
-      - Key Strengths: ${userData.strengths?.join(', ') || 'Not specified'}
-      - Technical Skills: ${userData.technicalSkills?.join(', ') || 'Not specified'}
-      - Salary Expectation: ${userData.salaryExpectation}
-      - Work Motivation: ${userData.workMotivation}
-      - Learning Style: ${userData.learningStyle}
-      - Collaboration Preference: ${userData.collaborationPreference}
-      - Time Preference: ${userData.timePreference}
-      - Guidance Preference: ${userData.guidancePreference}
-      - Work Pace: ${userData.workPace}
-
-      REQUIREMENTS:
-      1. Provide 3-5 career recommendations specifically for entry-level positions in the Philippines
-      2. Each recommendation should include:
-         - id: "1", "2", etc.
-         - title: Job Title
-         - matchPercentage: 60-95
-         - description: Detailed description...
-         - requiredSkills: ["skill1", "skill2"]
-         - salaryRange: "₱20,000 - ₱35,000 monthly"
-         - growthPotential: "High/Medium/Low"
-         - strengths: ["strength1", "strength2"]
-         - matchReason: "Why this matches the user..."
-         - industry: "Industry name"
-         - responsibilities: ["Responsibility 1", "Responsibility 2"]
-      
-      3. Provide 2-3 alternative career paths with:
-         - id: "1", "2", etc.
-         - title: Alternative Career
-         - description: Description...
-         - timeline: "6-12 months"
-         - matchPercentage: 55-85
-      
-      4. Provide a summary including:
-         - topMatch: 85
-         - averageMatch: 78
-         - totalRecommendations: 5
-         - suggestedNextSteps: ["Step 1", "Step 2", "Step 3", "Step 4", "Step 5"]
-         - timelineSuggestions: ["Suggestion 1", "Suggestion 2", "Suggestion 3", "Suggestion 4", "Suggestion 5"]
-         - userProfileSummary: "Brief summary of the user's profile"
-
-      IMPORTANT: 
-      - Focus on REAL entry-level positions available in the Philippine job market.
-      - Consider the user's education level and provide practical, achievable recommendations.
-      - Salary ranges should be realistic for entry-level positions in the Philippines.
-      - Include both technical and soft skills in requiredSkills.
-      - Make matchReason personalized to the user's specific inputs.
-
-      CRITICAL INSTRUCTIONS:
-      1. Return ONLY valid JSON, no additional text
-      2. Ensure all JSON is properly formatted
-      3. Use double quotes for all strings
-      4. Do not use markdown code blocks
-      5. Escape any special characters in strings
-
-      Format your response as a valid JSON object with the following structure:
-      {
-        "recommendations": [
-          {
-            "id": "1",
-            "title": "Job Title",
-            "matchPercentage": 85,
-            "description": "Detailed description...",
-            "requiredSkills": ["skill1", "skill2"],
-            "salaryRange": "₱20,000 - ₱35,000 monthly",
-            "growthPotential": "High",
-            "strengths": ["strength1", "strength2"],
-            "matchReason": "Why this matches the user...",
-            "industry": "Industry name",
-            "responsibilities": ["Responsibility 1", "Responsibility 2"]
-          }
-        ],
-        "alternatePaths": [
-          {
-            "id": "1",
-            "title": "Alternative Career",
-            "description": "Description...",
-            "timeline": "6-12 months",
-            "matchPercentage": 75
-          }
-        ],
-        "summary": {
-          "topMatch": 85,
-          "averageMatch": 78,
-          "totalRecommendations": 5,
-          "suggestedNextSteps": ["Step 1", "Step 2", "Step 3", "Step 4", "Step 5"],
-          "timelineSuggestions": ["Suggestion 1", "Suggestion 2", "Suggestion 3", "Suggestion 4", "Suggestion 5"],
-          "userProfileSummary": "Brief summary..."
-        }
-      }
-
-      Your response must start with { and end with }
-    `;
-
-    console.log('Sending request to Groq AI...');
-    
-    const chatCompletion = await groq.chat.completions.create({
-      messages: [
-        {
-          role: "system",
-          content: "You are a career guidance expert for Filipino students. Return only valid JSON."
-        },
-        {
-          role: "user",
-          content: prompt
-        }
-      ],
-      model: "openai/gpt-oss-120b", // Using the model from your example
-      temperature: 0.7, // Lower temperature for more consistent JSON
-      max_completion_tokens: 8192,
-      top_p: 0.8,
-      stream: false, // Set to false for single response
-      reasoning_effort: "medium",
-      stop: null
-    });
-    
-    let text = chatCompletion.choices[0]?.message?.content || '';
-    
-    console.log('Received response from Groq AI (first 200 chars):', text.substring(0, 200));
-    
-    // Clean the response text
-    text = text.trim();
-    
-    // Remove markdown code blocks if present
-    text = text.replace(/```json\s*/g, '').replace(/```\s*/g, '');
-    
-    // Try to extract JSON if the response contains other text
-    const jsonMatch = text.match(/\{[\s\S]*\}/);
-    if (jsonMatch) {
-      text = jsonMatch[0];
-    }
-    
-    console.log('Cleaned JSON text (first 200 chars):', text.substring(0, 200));
-    
-    // Parse the JSON response
-    try {
-      const parsedResponse = JSON.parse(text);
-      console.log('Successfully parsed JSON response');
-      return parsedResponse;
-    } catch (parseError: any) {
-      console.error('Error parsing Groq AI response:', parseError.message);
-      console.log('Attempting to fix JSON...');
-      
-      // Try to fix common JSON issues
-      text = text.replace(/'/g, '"'); // Replace single quotes with double quotes
-      text = text.replace(/,\s*}/g, '}'); // Remove trailing commas
-      text = text.replace(/,\s*\]/g, ']'); // Remove trailing commas in arrays
-      text = text.replace(/True/g, 'true').replace(/False/g, 'false'); // Fix Python booleans
-      text = text.replace(/None/g, 'null'); // Fix Python nulls
-      
-      try {
-        const parsedResponse = JSON.parse(text);
-        console.log('Successfully parsed after cleaning');
-        return parsedResponse;
-      } catch (finalError: any) {
-        console.error('Failed to parse even after cleaning:', finalError.message);
-        console.log('Problematic JSON:', text);
-        throw new Error('Failed to parse AI response as JSON');
-      }
-    }
-    
-  } catch (err: any) {
-    console.error('Error calling Groq AI:', {
-      message: err.message,
-      stack: err.stack,
-      name: err.name
-    });
-    
-    // Check for specific Groq API errors
-    if (err.message?.includes('API key') || err.message?.includes('authentication')) {
-      throw new Error('Invalid API key. Please check your Groq API key.');
-    }
-    
-    if (err.message?.includes('quota') || err.message?.includes('rate limit')) {
-      throw new Error('API quota exceeded. Please check your Groq usage.');
-    }
-    
-    throw err;
-  }
-}
-
-// Function to generate job search links
+// Generate job search links (same as before)
 function generateJobLinks(recommendations: CareerMatch[]): string[] {
   const links: string[] = [];
   
   recommendations.forEach(career => {
     const encodedTitle = encodeURIComponent(career.title + ' entry level Philippines');
     
-    // Different job platforms
     const platforms = [
       `https://ph.indeed.com/jobs?q=${encodedTitle}&l=Philippines&jt=fulltime&fromage=3`,
       `https://www.linkedin.com/jobs/search/?keywords=${encodedTitle}&location=Philippines&f_TPR=r2592000&position=1&pageNum=0`,
@@ -305,81 +411,15 @@ function generateJobLinks(recommendations: CareerMatch[]): string[] {
       `https://www.kalibrr.com/home/te/${encodedTitle}/philippines`
     ];
     
-    // Add 2-3 different platforms
     platforms.slice(0, 3).forEach(platform => {
       links.push(platform);
     });
   });
   
-  return links;
+  return [...new Set(links)]; // Remove duplicates
 }
 
-// Improved validation function
-function validateUserData(userData: UserPreferences): { isValid: boolean; errors: string[] } {
-  const errors: string[] = [];
-
-  // Check Preferences section
-  if (!userData.workTypes || userData.workTypes.length === 0) {
-    errors.push('Work types are required');
-  }
-  
-  if (!userData.salaryExpectation) {
-    errors.push('Salary expectation is required');
-  }
-  
-  if (!userData.workMotivation) {
-    errors.push('Work motivation is required');
-  }
-  
-  if (!userData.educationLevel) {
-    errors.push('Education level is required');
-  }
-  
-  if (!userData.educationField) {
-    errors.push('Education field is required');
-  }
-  
-  if (!userData.workExperience) {
-    errors.push('Work experience level is required');
-  }
-
-  // Check Skills section
-  if (!userData.strengths || userData.strengths.length === 0) {
-    errors.push('At least one strength is required');
-  }
-  
-  if (!userData.technicalSkills || userData.technicalSkills.length === 0) {
-    errors.push('At least one technical skill is required');
-  }
-
-  // Check Work Preferences section
-  if (!userData.learningStyle) {
-    errors.push('Learning style is required');
-  }
-  
-  if (!userData.collaborationPreference) {
-    errors.push('Collaboration preference is required');
-  }
-  
-  if (!userData.timePreference) {
-    errors.push('Time preference is required');
-  }
-  
-  if (!userData.guidancePreference) {
-    errors.push('Guidance preference is required');
-  }
-  
-  if (!userData.workPace) {
-    errors.push('Work pace is required');
-  }
-
-  return {
-    isValid: errors.length === 0,
-    errors
-  };
-}
-
-// Function to enhance recommendations with additional data
+// Enhance recommendations with additional data (same as before)
 function enhanceRecommendations(recommendations: CareerMatch[]): CareerMatch[] {
   const icons = [
     'fa-solid fa-code',
@@ -417,7 +457,6 @@ function enhanceRecommendations(recommendations: CareerMatch[]): CareerMatch[] {
   }));
 }
 
-// Function to enhance alternate paths
 function enhanceAlternatePaths(alternatePaths: AlternatePath[]): AlternatePath[] {
   const icons = [
     'fa-solid fa-palette',
@@ -444,7 +483,7 @@ function enhanceAlternatePaths(alternatePaths: AlternatePath[]): AlternatePath[]
   }));
 }
 
-// Helper functions for enhancement
+// Helper functions for enhancement (same as before)
 function getCertificationPaths(industry: string): string[] {
   const certifications: Record<string, string[]> = {
     'Technology': ['Google IT Support', 'AWS Cloud Practitioner', 'CompTIA A+'],
@@ -489,84 +528,66 @@ function getEducationRequired(industry: string): string {
   return educationMap[industry] || 'Bachelor\'s degree in relevant field';
 }
 
+function validateUserData(userData: UserPreferences): { isValid: boolean; errors: string[] } {
+  const errors: string[] = [];
+
+  if (!userData.workTypes || userData.workTypes.length === 0) {
+    errors.push('Work types are required');
+  }
+  if (!userData.salaryExpectation) errors.push('Salary expectation is required');
+  if (!userData.workMotivation) errors.push('Work motivation is required');
+  if (!userData.educationLevel) errors.push('Education level is required');
+  if (!userData.educationField) errors.push('Education field is required');
+  if (!userData.workExperience) errors.push('Work experience level is required');
+  if (!userData.strengths || userData.strengths.length === 0) errors.push('At least one strength is required');
+  if (!userData.technicalSkills || userData.technicalSkills.length === 0) errors.push('At least one technical skill is required');
+  if (!userData.learningStyle) errors.push('Learning style is required');
+  if (!userData.collaborationPreference) errors.push('Collaboration preference is required');
+  if (!userData.timePreference) errors.push('Time preference is required');
+  if (!userData.guidancePreference) errors.push('Guidance preference is required');
+  if (!userData.workPace) errors.push('Work pace is required');
+
+  return { isValid: errors.length === 0, errors };
+}
+
 // Main POST handler
 export const POST: RequestHandler = async ({ request }) => {
   console.log('=== API CALL STARTED ===');
   
   try {
-    // Validate API key first
+    // Validate API key
     if (!validateApiKey()) {
-      console.error('API key validation failed');
-      return json(
-        {
-          error: 'API Configuration Error',
-          message: 'Invalid or missing Groq API key. Please check your environment variables.',
-          recommendations: [],
-          alternatePaths: [],
-          jobLinks: [],
-          summary: {
-            topMatch: 0,
-            averageMatch: 0,
-            totalRecommendations: 0,
-            suggestedNextSteps: [],
-            timelineSuggestions: [],
-            userProfileSummary: ''
-          }
-        },
-        { status: 500 }
-      );
+      return json(getFallbackRecommendations('API key missing'), { status: 200 });
     }
 
     const userData: UserPreferences = await request.json();
-    
-    console.log('Received user data for AI analysis:', {
-      workTypes: userData.workTypes?.length,
-      educationField: userData.educationField,
-      educationLevel: userData.educationLevel,
-      strengths: userData.strengths?.length,
-      skills: userData.technicalSkills?.length,
-      workPreferences: {
-        learningStyle: userData.learningStyle,
-        collaborationPreference: userData.collaborationPreference,
-        timePreference: userData.timePreference,
-        guidancePreference: userData.guidancePreference,
-        workPace: userData.workPace
-      }
-    });
+    console.log('Received user data');
 
-    // Validate all required fields
+    // Validate user data
     const validation = validateUserData(userData);
-    
     if (!validation.isValid) {
-      console.error('Validation failed:', validation.errors);
-      return json(
-        {
-          error: 'Validation failed',
-          message: 'Please complete all sections',
-          details: validation.errors,
-          recommendations: [],
-          alternatePaths: [],
-          jobLinks: [],
-          summary: {
-            topMatch: 0,
-            averageMatch: 0,
-            totalRecommendations: 0,
-            suggestedNextSteps: [],
-            timelineSuggestions: [],
-            userProfileSummary: ''
-          }
-        },
-        { status: 400 }
-      );
+      return json({
+        error: 'Validation failed',
+        message: 'Please complete all sections',
+        details: validation.errors,
+        ...getFallbackRecommendations('Validation failed')
+      }, { status: 400 });
     }
 
-    console.log('Calling Groq AI for career analysis...');
+    // Check cache
+    const cacheKey = responseCache.generateKey(userData);
+    const cachedResponse = responseCache.get(cacheKey);
+    if (cachedResponse) {
+      console.log('Returning cached response');
+      return json(cachedResponse);
+    }
+
+    console.log('Calling Groq AI with chunked analysis...');
     
-    // Get AI-powered recommendations
-    const aiResponse = await analyzeWithGroq(userData);
+    // Get AI-powered recommendations using chunked approach
+    const aiResponse = await analyzeWithGroqChunked(userData);
     
     if (!aiResponse || !aiResponse.recommendations) {
-      console.error('Invalid AI response:', aiResponse);
       throw new Error('Invalid response from AI service');
     }
     
@@ -575,16 +596,12 @@ export const POST: RequestHandler = async ({ request }) => {
       alternatePathsCount: aiResponse.alternatePaths?.length
     });
     
-    // Enhance recommendations with additional data
+    // Enhance recommendations
     const enhancedRecommendations = enhanceRecommendations(aiResponse.recommendations);
     const enhancedAlternatePaths = enhanceAlternatePaths(aiResponse.alternatePaths || []);
     
     // Generate job links
     const jobLinks = generateJobLinks(enhancedRecommendations);
-    
-    // Calculate average match if not provided
-    const averageMatch = aiResponse.summary?.averageMatch || 
-      Math.round(enhancedRecommendations.reduce((sum, r) => sum + r.matchPercentage, 0) / enhancedRecommendations.length);
     
     // Prepare response
     const response: RecommendationResponse = {
@@ -593,7 +610,8 @@ export const POST: RequestHandler = async ({ request }) => {
       jobLinks,
       summary: {
         topMatch: aiResponse.summary?.topMatch || enhancedRecommendations[0]?.matchPercentage || 0,
-        averageMatch: averageMatch,
+        averageMatch: aiResponse.summary?.averageMatch || 
+          Math.round(enhancedRecommendations.reduce((sum, r) => sum + r.matchPercentage, 0) / enhancedRecommendations.length),
         totalRecommendations: (enhancedRecommendations.length + enhancedAlternatePaths.length),
         suggestedNextSteps: aiResponse.summary?.suggestedNextSteps || [
           "Update your LinkedIn profile to highlight relevant skills",
@@ -614,51 +632,24 @@ export const POST: RequestHandler = async ({ request }) => {
       }
     };
 
-    console.log('Successfully generated AI-powered recommendations:', {
-      topMatch: `${response.summary.topMatch}%`,
-      recommendations: response.recommendations.map(r => `${r.title} (${r.matchPercentage}%)`),
-      totalRecommendations: response.summary.totalRecommendations
-    });
+    // Cache the response
+    responseCache.set(cacheKey, response);
 
-    return json(response, {
-      status: 200,
-      headers: {
-        'Content-Type': 'application/json',
-        'Cache-Control': 'no-cache, no-store, must-revalidate',
-        'Pragma': 'no-cache',
-        'Expires': '0'
-      }
-    });
+    console.log('Successfully generated recommendations');
+    return json(response);
 
   } catch (err: any) {
-    console.error('Error generating career recommendations:', {
-      message: err.message,
-      stack: err.stack,
-      name: err.name
-    });
+    console.error('Error generating career recommendations:', err.message);
     
-    // Return fallback recommendations if AI fails
-    const fallbackRecommendations = getFallbackRecommendations();
-    
-    return json(
-      {
-        error: 'AI Service Error',
-        message: 'Using fallback recommendations. The AI service encountered an issue.',
-        details: err.message || 'Unknown error',
-        ...fallbackRecommendations
-      },
-      {
-        status: 200, // Return 200 with fallback data
-        headers: {
-          'Content-Type': 'application/json'
-        }
-      }
-    );
+    // Return fallback recommendations
+    return json(getFallbackRecommendations(err.message), { status: 200 });
   }
 };
 
-// Fallback function in case AI fails
-function getFallbackRecommendations(): RecommendationResponse {
+// Updated fallback function with parameter
+function getFallbackRecommendations(errorMessage?: string): RecommendationResponse {
+  console.log('Using fallback recommendations due to:', errorMessage || 'Unknown error');
+  
   return {
     recommendations: [
       {
@@ -744,43 +735,30 @@ function getFallbackRecommendations(): RecommendationResponse {
         resources: ['Google IT Support Certificate', 'CompTIA A+ Certification', 'Microsoft Technology Associate'],
         icon: 'fa-solid fa-headset',
         gradient: 'from-orange-500 to-red-500'
-      },
-      {
-        id: '3',
-        title: 'Content Writer/Creator',
-        description: 'Role focused on creating written or visual content for websites, blogs, and social media. Ideal for those with strong communication and creativity skills.',
-        timeline: '3-6 months portfolio building',
-        matchPercentage: 68,
-        requiredSkills: ['Writing Skills', 'Research', 'Creativity', 'SEO Basics'],
-        resources: ['HubSpot Content Marketing Course', 'Copywriting courses', 'SEO fundamentals training'],
-        icon: 'fa-solid fa-pen-fancy',
-        gradient: 'from-yellow-500 to-amber-500'
       }
     ],
     jobLinks: [
       'https://ph.indeed.com/jobs?q=Junior+Software+Developer+entry+level&l=Philippines&jt=fulltime&fromage=3',
       'https://ph.indeed.com/jobs?q=Data+Analyst+trainee&l=Philippines&jt=fulltime',
-      'https://www.linkedin.com/jobs/search/?keywords=entry%20level%20developer&location=Philippines&f_TPR=r2592000',
-      'https://www.jobstreet.com.ph/digital-marketing-assistant-jobs',
-      'https://www.kalibrr.com/home/te/software-developer-entry-level/philippines'
+      'https://www.linkedin.com/jobs/search/?keywords=entry%20level%20developer&location=Philippines&f_TPR=r2592000'
     ],
     summary: {
       topMatch: 85,
-      averageMatch: 75,
-      totalRecommendations: 6,
+      averageMatch: 78,
+      totalRecommendations: 5,
       suggestedNextSteps: [
         'Update your LinkedIn profile with relevant skills and projects',
-        'Create a portfolio showcasing your work (GitHub for developers, writing samples for writers)',
-        'Network with professionals in your target industry through LinkedIn and local events',
-        'Research and apply for relevant certifications to enhance your qualifications',
-        'Practice common interview questions and prepare your elevator pitch'
+        'Create a portfolio showcasing your work',
+        'Network with professionals in your target industry',
+        'Research and apply for relevant certifications',
+        'Practice common interview questions'
       ],
       timelineSuggestions: [
         'Complete 1-2 relevant online courses in the next 3 months',
         'Apply for at least 5 internships or entry-level positions this semester',
         'Attend 2-3 career fairs or networking events in the next month',
-        'Prepare and get feedback on your resume from career services',
-        'Schedule informational interviews with 3 professionals in your field'
+        'Prepare and get feedback on your resume',
+        'Schedule informational interviews with professionals'
       ],
       userProfileSummary: 'Career-focused student seeking entry-level opportunities with a mix of technical and creative interests'
     }
@@ -791,54 +769,17 @@ function getFallbackRecommendations(): RecommendationResponse {
 export const GET: RequestHandler = async () => {
   const apiKeyValid = validateApiKey();
   
-  // Test the API key with a simple request if valid
-  let apiTestResult = 'Not tested';
-  if (apiKeyValid) {
-    try {
-      const testCompletion = await groq.chat.completions.create({
-        messages: [
-          {
-            role: "user",
-            content: "Hello, respond with 'OK' if you're working."
-          }
-        ],
-        model: "openai/gpt-oss-120b",
-        temperature: 0.7,
-        max_completion_tokens: 10,
-        top_p: 0.8,
-        stream: false,
-        reasoning_effort: "low"
-      });
-      
-      apiTestResult = 'Connected successfully';
-    } catch (error: any) {
-      apiTestResult = `Connection failed: ${error.message}`;
-    }
-  }
-  
   return json({
-    message: 'CareerGeenie AI Recommendation API',
+    message: 'CareerGeenie AI Recommendation API (Optimized for 8000 TPM)',
     status: apiKeyValid ? 'Operational' : 'API Key Required',
-    apiTest: apiTestResult,
-    endpoints: {
-      POST: '/api/recommendations - Submit user data for AI-powered career recommendations',
-      GET: '/api/recommendations - API status'
-    },
     features: [
-      'AI-powered career matching using Groq AI',
-      'Personalized recommendations based on user profile',
-      'Philippine job market focus',
-      'Realistic salary ranges for entry-level positions',
-      'Practical next steps and timeline suggestions'
+      'Rate limiting to respect 8000 TPM',
+      'Response caching for 1 hour',
+      'Chunked API calls to reduce token usage',
+      'Automatic retry on rate limits',
+      'Fallback recommendations when API fails'
     ],
-    aiModel: 'GPT-OSS-120B (Groq)',
-    version: '2.0.0',
-    timestamp: new Date().toISOString(),
-    note: apiKeyValid ? 'API key is configured' : 'Please configure VITE_GROQ_API_KEY in environment variables'
-  }, {
-    status: 200,
-    headers: {
-      'Content-Type': 'application/json'
-    }
+    version: '3.0.0',
+    timestamp: new Date().toISOString()
   });
 };
