@@ -575,7 +575,7 @@
     }
   }
 
-  // ENHANCED: Generate professional summary based on assessment results
+  // Generate professional summary based on assessment results (no salary information)
   function generateDynamicProfessionalSummary(
     career: CareerMatch | null, 
     assessment: Assessment | null,
@@ -586,72 +586,92 @@
     }
 
     const careerTitle = career.title;
-    const matchScore = career.matchPercentage || assessment?.match_score || 0;
     const strengths = career.strengths || [];
     const industry = career.industry || '';
     const experienceLevel = career.experienceLevel || '';
     const requiredSkills = career.requiredSkills || [];
-    const salaryData = career.salaryData;
+    const matchReason = career.matchReason || '';
     
-    // Build a rich, personalized summary based on actual assessment data
-    let summary = '';
+    // Build a complete, well-structured professional summary without salary information
+    let summaryParts: string[] = [];
     
-    // Opening based on match strength
-    if (matchScore >= 85) {
-      summary = `Exceptional ${careerTitle} professional with an outstanding ${matchScore}% career match based on comprehensive assessment. `;
-    } else if (matchScore >= 70) {
-      summary = `Dedicated ${careerTitle} professional demonstrating strong alignment (${matchScore}% match) with role requirements. `;
-    } else if (matchScore >= 55) {
-      summary = `Motivated aspiring ${careerTitle} with promising potential (${matchScore}% match) and strong foundational skills. `;
-    } else {
-      summary = `Ambitious professional targeting ${careerTitle} role with ${matchScore}% career match and clear development path. `;
-    }
+    // Professional opening
+    summaryParts.push(`Exceptional ${careerTitle} professional with proven expertise and strong alignment with role requirements.`);
     
     // Add experience level context
     if (experienceLevel) {
       const levelText = experienceLevel.toLowerCase();
       if (levelText.includes('senior') || levelText.includes('lead')) {
-        summary += `Senior-level expertise with proven track record in ${industry || 'the field'}. `;
+        if (industry) {
+          summaryParts.push(`Senior-level expertise with a proven track record in the ${industry} sector.`);
+        } else {
+          summaryParts.push(`Senior-level expertise with a proven track record in the field.`);
+        }
       } else if (levelText.includes('mid')) {
-        summary += `Mid-level practitioner with solid experience and growing expertise in ${industry || 'the industry'}. `;
+        if (industry) {
+          summaryParts.push(`Mid-level practitioner with solid experience and growing expertise in the ${industry} industry.`);
+        } else {
+          summaryParts.push(`Mid-level practitioner with solid experience and growing expertise.`);
+        }
       } else if (levelText.includes('junior') || levelText.includes('entry')) {
-        summary += `Early-career professional with strong foundational knowledge and rapid learning ability. `;
+        summaryParts.push(`Early-career professional with strong foundational knowledge and demonstrated rapid learning ability.`);
       }
+    } else if (industry) {
+      summaryParts.push(`Specialized expertise in the ${industry} sector with a focus on delivering measurable results.`);
     }
     
     // Add strengths from assessment
     if (strengths.length > 0) {
       const topStrengths = strengths.slice(0, 3);
-      summary += `Core strengths include ${topStrengths.join(', ')}. `;
+      if (topStrengths.length === 1) {
+        summaryParts.push(`A key strength is ${topStrengths[0]}.`);
+      } else {
+        const strengthsList = topStrengths.slice(0, -1).join(', ');
+        const lastStrength = topStrengths[topStrengths.length - 1];
+        summaryParts.push(`Core strengths include ${strengthsList}${topStrengths.length > 1 ? ' and ' : ''}${lastStrength}.`);
+      }
     }
     
-    // Add industry context
-    if (industry) {
-      summary += `Deeply engaged with ${industry} sector trends and best practices. `;
-    }
-    
-    // Add match reason insight
-    if (career.matchReason) {
-      summary += career.matchReason;
-    }
-    
-    // Add salary awareness if available
-    if (salaryData && salaryData.average) {
-      summary += ` Market-aligned compensation expectations (₱${Math.round(salaryData.average / 1000)}K-₱${Math.round(salaryData.max / 1000)}K/month). `;
+    // Add match reason if available and not already covered
+    if (matchReason && matchReason.length > 0 && matchReason.length < 200) {
+      summaryParts.push(matchReason);
     }
     
     // Add skills focus
     if (requiredSkills.length > 0) {
       const keySkills = requiredSkills.slice(0, 2);
-      summary += `Proficient in ${keySkills.join(' and ')}${requiredSkills.length > 2 ? ' and other technical competencies' : ''}. `;
+      if (keySkills.length === 1) {
+        summaryParts.push(`Proficient in ${keySkills[0]}.`);
+      } else {
+        summaryParts.push(`Proficient in ${keySkills[0]} and ${keySkills[1]}${requiredSkills.length > 2 ? ' among other technical competencies' : ''}.`);
+      }
     }
     
-    // Add career aspiration
-    summary += `Committed to delivering measurable impact and driving success in ${careerTitle} role.`;
+    // Add career aspiration with strong professional ending
+    summaryParts.push(`Committed to delivering measurable impact and driving sustained success in the ${careerTitle} role.`);
     
-    // Limit summary length
-    if (summary.length > 500) {
-      summary = summary.substring(0, 497) + '...';
+    // Join all parts with spaces
+    let summary = summaryParts.join(' ');
+    
+    // Ensure summary doesn't exceed reasonable length but keep it complete
+    if (summary.length > 600) {
+      // Instead of cutting mid-sentence, we'll take complete sentences
+      const sentences = summary.match(/[^.!?]+[.!?]+/g) || [];
+      let truncatedSummary = '';
+      for (const sentence of sentences) {
+        if ((truncatedSummary + sentence).length <= 580) {
+          truncatedSummary += sentence;
+        } else {
+          break;
+        }
+      }
+      // If we have at least one complete sentence, use that
+      if (truncatedSummary.length > 0) {
+        summary = truncatedSummary;
+      } else {
+        // Fallback to a clean, complete professional statement
+        summary = `Exceptional ${careerTitle} professional with proven expertise and strong alignment with role requirements. Committed to delivering measurable impact and driving sustained success.`;
+      }
     }
     
     return summary;
@@ -692,7 +712,7 @@
       }>
     };
     
-    // Generate dynamic professional summary based on assessment results
+    // Generate dynamic professional summary based on assessment results (without salary information)
     if (career) {
       newResumeData.summary = generateDynamicProfessionalSummary(
         career, 
