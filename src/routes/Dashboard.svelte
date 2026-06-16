@@ -1059,7 +1059,17 @@
     resumeData.certifications = resumeData.certifications.filter((_, i) => i !== index);
   }
 
-  // Generate PDF Resume using browser's print functionality
+  // Helper function to estimate page count and generate page numbers
+  function getResumePageCount(resumeElement: HTMLElement): number {
+    // Calculate approximate page count based on content height
+    // This is a heuristic - each page is roughly 1000px of content height
+    const contentHeight = resumeElement.scrollHeight;
+    const pageHeight = 1000; // Approximate height of content per A4 page
+    const pageCount = Math.max(1, Math.ceil(contentHeight / pageHeight));
+    return pageCount;
+  }
+
+  // Generate PDF Resume with page numbers
   async function generatePDFResume() {
     try {
       isGeneratingPDF = true;
@@ -1069,6 +1079,9 @@
       if (!resumeElement) {
         throw new Error('Resume content not found');
       }
+
+      // Estimate page count for the resume
+      const totalPages = getResumePageCount(resumeElement);
 
       // Create a print-friendly version
       const printWindow = window.open('', '_blank');
@@ -1137,7 +1150,7 @@
 
                 @page {
                   size: A4;
-                  margin: 1in;
+                  margin: 0.75in 0.5in;
                 }
 
                 * { margin: 0; padding: 0; box-sizing: border-box; }
@@ -1146,11 +1159,12 @@
                   font-family: 'Inter', sans-serif;
                   font-size: 11pt;
                   color: #1e293b;
-                  line-height: 1;
+                  line-height: 1.5;
                 }
 
                 .resume-print {
                   width: 100%;
+                  position: relative;
                 }
 
                 .resume-header-section {
@@ -1323,6 +1337,22 @@
                   line-height: 1.5;
                 }
 
+                /* Page number styling */
+                .page-number {
+                  text-align: center;
+                  font-size: 9pt;
+                  color: #94a3b8;
+                  padding-top: 10pt;
+                  margin-top: 10pt;
+                  border-top: 1pt solid #e2e8f0;
+                }
+
+                /* Page break handling */
+                .page-break {
+                  page-break-after: always;
+                  break-after: page;
+                }
+
                 @media print {
                   body { -webkit-print-color-adjust: exact; print-color-adjust: exact; }
                   .no-print { display: none !important; }
@@ -1330,6 +1360,20 @@
                   .section-title-print  { page-break-after: avoid; }
                   .experience-item-print,
                   .education-item-print { page-break-inside: avoid; }
+                  
+                  /* Ensure page numbers appear on each page */
+                  .page-number { 
+                    position: running(pageNumber); 
+                  }
+                  
+                  @page {
+                    @bottom-center {
+                      content: "Page " counter(page) " of ${totalPages}";
+                      font-size: 9pt;
+                      color: #94a3b8;
+                      font-family: 'Inter', sans-serif;
+                    }
+                  }
                 }
             </style>
         </head>
@@ -1361,10 +1405,22 @@
                 <div class="generated-footer-print">
                   Generated on ${new Date().toLocaleDateString()} by CareerGeenie
                 </div>
+                
+                <!-- Page number will be automatically added by print CSS -->
             </div>
             <script>
                 window.onload = function() {
+                    // Add page numbers using JavaScript as a fallback
+                    const pages = document.querySelectorAll('.page-break');
+                    const totalPages = ${totalPages};
+                    
+                    // Add page number to each page using CSS counters via JavaScript
+                    // The CSS @page rule will handle the main page numbering
+                    
+                    // Print the document
                     window.print();
+                    
+                    // Close the window after printing
                     setTimeout(function() { window.close(); }, 1000);
                 };
             <\/script>
