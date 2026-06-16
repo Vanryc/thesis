@@ -1317,6 +1317,12 @@
                   text-align: center;
                 }
 
+                /* Professional Summary justification */
+                .professional-summary-text {
+                  text-align: justify;
+                  line-height: 1.5;
+                }
+
                 @media print {
                   body { -webkit-print-color-adjust: exact; print-color-adjust: exact; }
                   .no-print { display: none !important; }
@@ -1342,7 +1348,7 @@
 
                 <div class="resume-section-print">
                   <div class="section-title-print">Professional Summary</div>
-                  <div style="font-size:10pt;color:#475569;line-height:1.5;">
+                  <div class="professional-summary-text" style="font-size:10pt;color:#475569;">
                     ${resumeData?.summary ? escapeHtml(resumeData.summary) : '[Awaiting user input]'}
                   </div>
                 </div>
@@ -3068,7 +3074,7 @@
                 
                 <div class="resume-section-preview">
                   <h2 class="section-title-preview"><i class="fa-solid fa-user-tie"></i> Professional Summary</h2>
-                  <p class="section-content">
+                  <p class="section-content professional-summary-preview" style="text-align: justify;">
                     {resumeData.summary || '[Awaiting user input]'}
                   </p>
                 </div>
@@ -3567,6 +3573,12 @@
       font-size: 0.75rem;
       color: #94a3b8;
       text-align: center;
+    }
+
+    /* Professional Summary justification for modal preview */
+    .professional-summary-preview {
+      text-align: justify;
+      line-height: 1.5;
     }
 
     /* Toast */
